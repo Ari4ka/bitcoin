@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Bitcoin Core developers
+// Copyright (c) 2020-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -6,6 +6,7 @@
 #include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/fuzz.h>
 #include <test/fuzz/util.h>
+#include <util/check.h>
 
 #include <cstdint>
 #include <vector>
@@ -34,7 +35,7 @@ FUZZ_TARGET(crypto_poly1305_split)
     std::vector<std::byte> total_input;
 
     // Process input in pieces.
-    LIMITED_WHILE(provider.remaining_bytes(), 100) {
+    LIMITED_WHILE (provider.remaining_bytes(), 100) {
         auto in = ConsumeRandomLengthByteVector<std::byte>(provider);
         poly_split.Update(in);
         // Update total_input to match what was processed.

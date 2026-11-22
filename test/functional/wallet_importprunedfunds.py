@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-# Copyright (c) 2014-2022 The Bitcoin Core developers
+# Copyright (c) 2014-present The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-"""Test the importprunedfunds and removeprunedfunds RPCs."""
+"""Test the importprunedfunds RPC."""
 from decimal import Decimal
 
 from test_framework.address import key_to_p2wpkh
@@ -15,17 +15,18 @@ from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal,
     assert_raises_rpc_error,
+    find_vout_for_address,
+    wallet_importprivkey,
 )
 from test_framework.wallet_util import generate_keypair
 
 
 class ImportPrunedFundsTest(BitcoinTestFramework):
-    def add_options(self, parser):
-        self.add_wallet_options(parser)
-
     def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 2
+        self.noban_tx_relay = True  # faster tx relay
+        self.extra_args = [["-deprecatedrpc=removeprunedfunds"]] * 2
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
@@ -41,7 +42,7 @@ class ImportPrunedFundsTest(BitcoinTestFramework):
         # privkey
         address3_privkey, address3_pubkey = generate_keypair(wif=True)
         address3 = key_to_p2wpkh(address3_pubkey)
-        self.nodes[0].importprivkey(address3_privkey)
+        wallet_importprivkey(self.nodes[0], address3_privkey, "now")
 
         # Check only one address
         address_info = self.nodes[0].getaddressinfo(address1)
@@ -54,15 +55,12 @@ class ImportPrunedFundsTest(BitcoinTestFramework):
 
         # Address Test - before import
         address_info = self.nodes[1].getaddressinfo(address1)
-        assert_equal(address_info['iswatchonly'], False)
         assert_equal(address_info['ismine'], False)
 
         address_info = self.nodes[1].getaddressinfo(address2)
-        assert_equal(address_info['iswatchonly'], False)
         assert_equal(address_info['ismine'], False)
 
         address_info = self.nodes[1].getaddressinfo(address3)
-        assert_equal(address_info['iswatchonly'], False)
         assert_equal(address_info['ismine'], False)
 
         # Send funds to self
@@ -92,42 +90,47 @@ class ImportPrunedFundsTest(BitcoinTestFramework):
         # Import with affiliated address with no rescan
         self.nodes[1].createwallet('wwatch', disable_private_keys=True)
         wwatch = self.nodes[1].get_wallet_rpc('wwatch')
-        wwatch.importaddress(address=address2, rescan=False)
+        wwatch.importdescriptors([{"desc": self.nodes[0].getaddressinfo(address2)["desc"], "timestamp": "now"}])
         wwatch.importprunedfunds(rawtransaction=rawtxn2, txoutproof=proof2)
-        assert [tx for tx in wwatch.listtransactions(include_watchonly=True) if tx['txid'] == txnid2]
+        assert txnid2 in [tx['txid'] for tx in wwatch.listtransactions()]
 
         # Import with private key with no rescan
         w1 = self.nodes[1].get_wallet_rpc(self.default_wallet_name)
-        w1.importprivkey(privkey=address3_privkey, rescan=False)
+        wallet_importprivkey(w1, address3_privkey, "now")
         w1.importprunedfunds(rawtxn3, proof3)
-        assert [tx for tx in w1.listtransactions() if tx['txid'] == txnid3]
+        assert txnid3 in [tx['txid'] for tx in w1.listtransactions()]
         balance3 = w1.getbalance()
         assert_equal(balance3, Decimal('0.025'))
 
         # Addresses Test - after import
         address_info = w1.getaddressinfo(address1)
-        assert_equal(address_info['iswatchonly'], False)
         assert_equal(address_info['ismine'], False)
         address_info = wwatch.getaddressinfo(address2)
-        if self.options.descriptors:
-            assert_equal(address_info['iswatchonly'], False)
-            assert_equal(address_info['ismine'], True)
-        else:
-            assert_equal(address_info['iswatchonly'], True)
-            assert_equal(address_info['ismine'], False)
+        assert_equal(address_info['ismine'], True)
         address_info = w1.getaddressinfo(address3)
-        assert_equal(address_info['iswatchonly'], False)
         assert_equal(address_info['ismine'], True)
 
-        # Remove transactions
-        assert_raises_rpc_error(-4, f'Transaction {txnid1} does not belong to this wallet', w1.removeprunedfunds, txnid1)
-        assert not [tx for tx in w1.listtransactions(include_watchonly=True) if tx['txid'] == txnid1]
+        # Import a spending transaction with no wallet outputs (issue #21647)
+        txid = self.nodes[0].sendtoaddress(address3, 0.1)
+        vout = find_vout_for_address(self.nodes[0], txid, address3)
+        self.generate(self.nodes[0], 1)
+        external_addr = self.nodes[0].getnewaddress()
+        spend_txid = w1.sendall(recipients=[external_addr], inputs=[{"txid": txid, "vout": vout}])["txid"]
+        self.sync_mempools()
+        self.generate(self.nodes[0], 1)
 
-        wwatch.removeprunedfunds(txnid2)
-        assert not [tx for tx in wwatch.listtransactions(include_watchonly=True) if tx['txid'] == txnid2]
+        funding_raw = w1.gettransaction(txid)['hex']
+        funding_proof = self.nodes[0].gettxoutproof([txid])
+        spend_raw = w1.gettransaction(spend_txid)['hex']
+        spend_proof = self.nodes[0].gettxoutproof([spend_txid])
 
-        w1.removeprunedfunds(txnid3)
-        assert not [tx for tx in w1.listtransactions(include_watchonly=True) if tx['txid'] == txnid3]
+        self.nodes[0].createwallet("fresh_wallet", disable_private_keys=True)
+        fresh_wallet = self.nodes[0].get_wallet_rpc("fresh_wallet")
+        desc = w1.getaddressinfo(address3)["desc"]
+        fresh_wallet.importdescriptors([{"desc": desc, "timestamp": "now"}])
+        fresh_wallet.importprunedfunds(funding_raw, funding_proof)
+        fresh_wallet.importprunedfunds(spend_raw, spend_proof)
+        assert [tx for tx in fresh_wallet.listtransactions() if tx['txid'] == spend_txid]
 
         # Check various RPC parameter validation errors
         assert_raises_rpc_error(-22, "TX decode failed", w1.importprunedfunds, b'invalid tx'.hex(), proof1)

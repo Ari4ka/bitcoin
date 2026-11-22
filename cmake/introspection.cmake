@@ -4,33 +4,30 @@
 
 include(CheckCXXSourceCompiles)
 include(CheckCXXSymbolExists)
-include(CheckIncludeFileCXX)
-
-# The following HAVE_{HEADER}_H variables go to the bitcoin-build-config.h header.
-check_include_file_cxx(sys/prctl.h HAVE_SYS_PRCTL_H)
-check_include_file_cxx(sys/resources.h HAVE_SYS_RESOURCES_H)
-check_include_file_cxx(sys/vmmeter.h HAVE_SYS_VMMETER_H)
-check_include_file_cxx(vm/vm_param.h HAVE_VM_VM_PARAM_H)
+include(CheckSourceCompilesWithFlags)
 
 check_cxx_symbol_exists(O_CLOEXEC "fcntl.h" HAVE_O_CLOEXEC)
 check_cxx_symbol_exists(fdatasync "unistd.h" HAVE_FDATASYNC)
 check_cxx_symbol_exists(fork "unistd.h" HAVE_DECL_FORK)
-check_cxx_symbol_exists(pipe2 "unistd.h" HAVE_DECL_PIPE2)
+if (NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  check_cxx_symbol_exists(pipe2 "unistd.h" HAVE_DECL_PIPE2)
+endif()
 check_cxx_symbol_exists(setsid "unistd.h" HAVE_DECL_SETSID)
 
-check_include_file_cxx(sys/types.h HAVE_SYS_TYPES_H)
-check_include_file_cxx(ifaddrs.h HAVE_IFADDRS_H)
-if(HAVE_SYS_TYPES_H AND HAVE_IFADDRS_H)
+if(NOT WIN32)
   include(TestAppendRequiredLibraries)
   test_append_socket_library(core_interface)
 endif()
 
 include(TestAppendRequiredLibraries)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Generic")
 test_append_atomic_library(core_interface)
+endif()
 
+# Even though ::system is part of the standard library, we still check
+# for it, to support building targets that don't have it, such as iOS.
 check_cxx_symbol_exists(std::system "cstdlib" HAVE_STD_SYSTEM)
-check_cxx_symbol_exists(::_wsystem "stdlib.h" HAVE__WSYSTEM)
-if(HAVE_STD_SYSTEM OR HAVE__WSYSTEM)
+if(HAVE_STD_SYSTEM)
   set(HAVE_SYSTEM 1)
 endif()
 
@@ -62,13 +59,6 @@ check_cxx_source_compiles("
 
 # Check for posix_fallocate().
 check_cxx_source_compiles("
-  // same as in src/util/fs_helpers.cpp
-  #ifdef __linux__
-  #ifdef _POSIX_C_SOURCE
-  #undef _POSIX_C_SOURCE
-  #endif
-  #define _POSIX_C_SOURCE 200112L
-  #endif // __linux__
   #include <fcntl.h>
 
   int main()
@@ -125,7 +115,6 @@ check_cxx_source_compiles("
   " HAVE_GETENTROPY_RAND
 )
 
-
 # - BSD sysctl()
 check_cxx_source_compiles("
   #include <sys/types.h>
@@ -159,73 +148,67 @@ check_cxx_source_compiles("
   " HAVE_SYSCTL_ARND
 )
 
-if(NOT MSVC)
-  include(CheckSourceCompilesWithFlags)
+# Check for SSE4.1 intrinsics.
+set(SSE41_CXXFLAGS -msse4.1)
+check_cxx_source_compiles_with_flags("
+  #include <immintrin.h>
 
-  # Check for SSE4.1 intrinsics.
-  set(SSE41_CXXFLAGS -msse4.1)
-  check_cxx_source_compiles_with_flags("
-    #include <immintrin.h>
+  int main()
+  {
+    __m128i a = _mm_set1_epi32(0);
+    __m128i b = _mm_set1_epi32(1);
+    __m128i r = _mm_blend_epi16(a, b, 0xFF);
+    return _mm_extract_epi32(r, 3);
+  }
+  " HAVE_SSE41
+  CXXFLAGS ${SSE41_CXXFLAGS}
+)
 
-    int main()
-    {
-      __m128i a = _mm_set1_epi32(0);
-      __m128i b = _mm_set1_epi32(1);
-      __m128i r = _mm_blend_epi16(a, b, 0xFF);
-      return _mm_extract_epi32(r, 3);
-    }
-    " HAVE_SSE41
-    CXXFLAGS ${SSE41_CXXFLAGS}
-  )
-  set(ENABLE_SSE41 ${HAVE_SSE41})
+# Check for AVX2 intrinsics.
+set(AVX2_CXXFLAGS -mavx -mavx2)
+check_cxx_source_compiles_with_flags("
+  #include <immintrin.h>
 
-  # Check for AVX2 intrinsics.
-  set(AVX2_CXXFLAGS -mavx -mavx2)
-  check_cxx_source_compiles_with_flags("
-    #include <immintrin.h>
+  int main()
+  {
+    __m256i l = _mm256_set1_epi32(0);
+    return _mm256_extract_epi32(l, 7);
+  }
+  " HAVE_AVX2
+  CXXFLAGS ${AVX2_CXXFLAGS}
+)
 
-    int main()
-    {
-      __m256i l = _mm256_set1_epi32(0);
-      return _mm256_extract_epi32(l, 7);
-    }
-    " HAVE_AVX2
-    CXXFLAGS ${AVX2_CXXFLAGS}
-  )
-  set(ENABLE_AVX2 ${HAVE_AVX2})
+# Check for x86 SHA-NI intrinsics.
+set(X86_SHANI_CXXFLAGS -msse4.1 -msha)
+check_cxx_source_compiles_with_flags("
+  #include <immintrin.h>
 
-  # Check for x86 SHA-NI intrinsics.
-  set(X86_SHANI_CXXFLAGS -msse4 -msha)
-  check_cxx_source_compiles_with_flags("
-    #include <immintrin.h>
+  int main()
+  {
+    __m128i i = _mm_set1_epi32(0);
+    __m128i j = _mm_set1_epi32(1);
+    __m128i k = _mm_set1_epi32(2);
+    return _mm_extract_epi32(_mm_sha256rnds2_epu32(i, j, k), 0);
+  }
+  " HAVE_X86_SHANI
+  CXXFLAGS ${X86_SHANI_CXXFLAGS}
+)
 
-    int main()
-    {
-      __m128i i = _mm_set1_epi32(0);
-      __m128i j = _mm_set1_epi32(1);
-      __m128i k = _mm_set1_epi32(2);
-      return _mm_extract_epi32(_mm_sha256rnds2_epu32(i, j, k), 0);
-    }
-    " HAVE_X86_SHANI
-    CXXFLAGS ${X86_SHANI_CXXFLAGS}
-  )
-  set(ENABLE_X86_SHANI ${HAVE_X86_SHANI})
+# Check for ARMv8 SHA-NI intrinsics.
+set(ARM_SHANI_CXXFLAGS -march=armv8-a+crypto)
+check_cxx_source_compiles_with_flags("
+  #include <arm_neon.h>
 
-  # Check for ARMv8 SHA-NI intrinsics.
-  set(ARM_SHANI_CXXFLAGS -march=armv8-a+crypto)
-  check_cxx_source_compiles_with_flags("
-    #include <arm_neon.h>
-
-    int main()
-    {
-      uint32x4_t a, b, c;
-      vsha256h2q_u32(a, b, c);
-      vsha256hq_u32(a, b, c);
-      vsha256su0q_u32(a, b);
-      vsha256su1q_u32(a, b, c);
-    }
-    " HAVE_ARM_SHANI
-    CXXFLAGS ${ARM_SHANI_CXXFLAGS}
-  )
-  set(ENABLE_ARM_SHANI ${HAVE_ARM_SHANI})
-endif()
+  int main()
+  {
+    uint32x4_t a = vdupq_n_u32(0);
+    uint32x4_t b = vdupq_n_u32(1);
+    uint32x4_t c = vdupq_n_u32(2);
+    vsha256h2q_u32(a, b, c);
+    vsha256hq_u32(a, b, c);
+    vsha256su0q_u32(a, b);
+    vsha256su1q_u32(a, b, c);
+  }
+  " HAVE_ARM_SHANI
+  CXXFLAGS ${ARM_SHANI_CXXFLAGS}
+)

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 The Bitcoin Core developers
+// Copyright (c) 2017-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,11 +7,12 @@
 #include <crypto/chacha20.h>
 #include <crypto/common.h>
 #include <hash.h>
+#include <span.h>
+#include <uint256.h>
 #include <util/check.h>
 
 #include <bit>
-#include <cassert>
-#include <cstdio>
+#include <cstring>
 #include <limits>
 
 namespace {
@@ -532,7 +533,7 @@ void Num3072::ToBytes(unsigned char (&out)[BYTE_SIZE]) {
     }
 }
 
-Num3072 MuHash3072::ToNum3072(Span<const unsigned char> in) {
+Num3072 MuHash3072::ToNum3072(std::span<const unsigned char> in) {
     unsigned char tmp[Num3072::BYTE_SIZE];
 
     uint256 hashed_in{(HashWriter{} << in).GetSHA256()};
@@ -543,7 +544,7 @@ Num3072 MuHash3072::ToNum3072(Span<const unsigned char> in) {
     return out;
 }
 
-MuHash3072::MuHash3072(Span<const unsigned char> in) noexcept
+MuHash3072::MuHash3072(std::span<const unsigned char> in) noexcept
 {
     m_numerator = ToNum3072(in);
 }
@@ -568,17 +569,18 @@ MuHash3072& MuHash3072::operator*=(const MuHash3072& mul) noexcept
 
 MuHash3072& MuHash3072::operator/=(const MuHash3072& div) noexcept
 {
+    const Num3072 div_numerator{div.m_numerator}; // div may alias *this
     m_numerator.Multiply(div.m_denominator);
-    m_denominator.Multiply(div.m_numerator);
+    m_denominator.Multiply(div_numerator);
     return *this;
 }
 
-MuHash3072& MuHash3072::Insert(Span<const unsigned char> in) noexcept {
+MuHash3072& MuHash3072::Insert(std::span<const unsigned char> in) noexcept {
     m_numerator.Multiply(ToNum3072(in));
     return *this;
 }
 
-MuHash3072& MuHash3072::Remove(Span<const unsigned char> in) noexcept {
+MuHash3072& MuHash3072::Remove(std::span<const unsigned char> in) noexcept {
     m_denominator.Multiply(ToNum3072(in));
     return *this;
 }

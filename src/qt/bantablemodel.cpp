@@ -1,19 +1,20 @@
-// Copyright (c) 2011-2022 The Bitcoin Core developers
+// Copyright (c) 2011-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <qt/bantablemodel.h>
 
 #include <interfaces/node.h>
-#include <net_types.h> // For banmap_t
-
-#include <utility>
+#include <net_types.h>
+#include <util/check.h>
 
 #include <QDateTime>
 #include <QList>
 #include <QLocale>
 #include <QModelIndex>
 #include <QVariant>
+
+#include <utility>
 
 bool BannedNodeLessThan::operator()(const CCombinedBan& left, const CCombinedBan& right) const
 {
@@ -29,7 +30,7 @@ bool BannedNodeLessThan::operator()(const CCombinedBan& left, const CCombinedBan
     case BanTableModel::Bantime:
         return pLeft->banEntry.nBanUntil < pRight->banEntry.nBanUntil;
     } // no default case, so the compiler can warn about missing cases
-    assert(false);
+    AssertUnreachable();
 }
 
 // private implementation
@@ -124,7 +125,7 @@ QVariant BanTableModel::data(const QModelIndex &index, int role) const
             date = date.addSecs(rec->banEntry.nBanUntil);
             return QLocale::system().toString(date, QLocale::LongFormat);
         } // no default case, so the compiler can warn about missing cases
-        assert(false);
+        AssertUnreachable();
     }
 
     return QVariant();

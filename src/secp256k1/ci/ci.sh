@@ -13,9 +13,9 @@ print_environment() {
     # does not rely on bash.
     for var in WERROR_CFLAGS MAKEFLAGS BUILD \
             ECMULTWINDOW ECMULTGENKB ASM WIDEMUL WITH_VALGRIND EXTRAFLAGS \
-            EXPERIMENTAL ECDH RECOVERY EXTRAKEYS MUSIG SCHNORRSIG ELLSWIFT \
-            SECP256K1_TEST_ITERS BENCH SECP256K1_BENCH_ITERS CTIMETESTS\
-            EXAMPLES \
+            EXPERIMENTAL ECDH RECOVERY EXTRAKEYS MUSIG SCHNORRSIG ELLSWIFT SILENTPAYMENTS \
+            SECP256K1_TEST_ITERS BENCH SECP256K1_BENCH_ITERS CTIMETESTS SYMBOL_CHECK \
+            EXAMPLES EXHAUSTIVE_TEST_ORDER EXHAUSTIVE_TEST_ARGS \
             HOST WRAPPER_CMD \
             CC CFLAGS CPPFLAGS AR NM \
             UBSAN_OPTIONS ASAN_OPTIONS LSAN_OPTIONS
@@ -52,22 +52,6 @@ if [ -n "$WRAPPER_CMD" ]; then
     $WRAPPER_CMD --version
 fi
 
-# Workaround for https://bugs.kde.org/show_bug.cgi?id=452758 (fixed in valgrind 3.20.0).
-case "${CC:-undefined}" in
-    clang*)
-        if [ "$CTIMETESTS" = "yes" ] && [ "$WITH_VALGRIND" = "yes" ]
-        then
-            export CFLAGS="${CFLAGS:+$CFLAGS }-gdwarf-4"
-        else
-            case "$WRAPPER_CMD" in
-                valgrind*)
-                    export CFLAGS="${CFLAGS:+$CFLAGS }-gdwarf-4"
-                    ;;
-            esac
-        fi
-        ;;
-esac
-
 ./autogen.sh
 
 ./configure \
@@ -80,6 +64,7 @@ esac
     --enable-module-extrakeys="$EXTRAKEYS" \
     --enable-module-schnorrsig="$SCHNORRSIG" \
     --enable-module-musig="$MUSIG" \
+    --enable-module-silentpayments="$SILENTPAYMENTS" \
     --enable-examples="$EXAMPLES" \
     --enable-ctime-tests="$CTIMETESTS" \
     --with-valgrind="$WITH_VALGRIND" \
@@ -94,10 +79,10 @@ if [ $build_exit_code -ne 0 ]; then
         *snapshot*)
             # Ignore internal compiler errors in gcc-snapshot and clang-snapshot
             grep -e "internal compiler error:" -e "PLEASE submit a bug report" make.log
-            return $?;
+            exit $?
             ;;
         *)
-            return 1;
+            exit 1
             ;;
     esac
 fi
@@ -106,6 +91,20 @@ fi
 file *tests* || true
 file bench* || true
 file .libs/* || true
+
+if [ "$SYMBOL_CHECK" = "yes" ]
+then
+    python3 --version
+    case "$HOST" in
+        *mingw*)
+            ls -l .libs
+            python3 ./tools/symbol-check.py .libs/libsecp256k1-*.dll
+            ;;
+        *)
+            python3 ./tools/symbol-check.py .libs/libsecp256k1.so
+            ;;
+    esac
+fi
 
 # This tells `make check` to wrap test invocations.
 export LOG_COMPILER="$WRAPPER_CMD"
@@ -117,6 +116,15 @@ EXEC='./libtool --mode=execute'
 if [ -n "$WRAPPER_CMD" ]
 then
     EXEC="$EXEC $WRAPPER_CMD"
+fi
+
+if [ -n "$EXHAUSTIVE_TEST_ORDER" ]
+then
+    # The group order is a compile-time constant, so rebuild for it.
+    rm -f exhaustive_tests src/exhaustive_tests-tests_exhaustive.o
+    make exhaustive_tests CPPFLAGS="${CPPFLAGS:-} -DEXHAUSTIVE_TEST_ORDER=$EXHAUSTIVE_TEST_ORDER"
+    $EXEC ./exhaustive_tests $EXHAUSTIVE_TEST_ARGS
+    rm -f exhaustive_tests src/exhaustive_tests-tests_exhaustive.o
 fi
 
 if [ "$BENCH" = "yes" ]

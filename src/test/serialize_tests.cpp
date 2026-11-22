@@ -1,17 +1,20 @@
-// Copyright (c) 2012-2022 The Bitcoin Core developers
+// Copyright (c) 2012-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <hash.h>
 #include <serialize.h>
 #include <streams.h>
+#include <test/util/common.h>
 #include <test/util/setup_common.h>
 #include <util/strencodings.h>
 
-#include <stdint.h>
-#include <string>
-
 #include <boost/test/unit_test.hpp>
+
+#include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <string>
 
 BOOST_FIXTURE_TEST_SUITE(serialize_tests, BasicTestingSetup)
 
@@ -57,7 +60,7 @@ public:
                boolval == rhs.boolval &&
                stringval == rhs.stringval &&
                strcmp(charstrval, rhs.charstrval) == 0 &&
-               *txval == *rhs.txval;
+               txval->Equals(*rhs.txval);
     }
 };
 
@@ -131,6 +134,35 @@ BOOST_AUTO_TEST_CASE(varints)
         ss >> VARINT(j);
         BOOST_CHECK_MESSAGE(i == j, "decoded:" << j << " expected:" << i);
     }
+}
+
+BOOST_AUTO_TEST_CASE(varints_overflow)
+{
+    const auto read_varint = [](uint64_t serialized, auto value) {
+        DataStream ss{};
+        ss << VARINT(serialized);
+        ss >> VARINT(value);
+        return value;
+    };
+
+    for (const uint32_t small_value : {
+             uint32_t{0},
+             uint32_t{1},
+             std::numeric_limits<uint32_t>::max(),
+         }) {
+        BOOST_CHECK_EQUAL(read_varint(small_value, uint32_t{}), small_value);
+    }
+
+    for (const uint64_t large_value : {
+             uint64_t{std::numeric_limits<uint32_t>::max()} + 1,
+             std::numeric_limits<uint64_t>::max(),
+         }) {
+        BOOST_CHECK_EQUAL(read_varint(large_value, uint64_t{}), large_value);
+
+        BOOST_CHECK_EXCEPTION(read_varint(large_value, uint32_t{}), std::ios_base::failure, HasReason{"VarInt exceeds destination range"});
+    }
+
+    BOOST_CHECK_EXCEPTION(read_varint(uint64_t{1} << 39, uint32_t{}), std::ios_base::failure, HasReason{"VarInt increment exceeds destination range"});
 }
 
 BOOST_AUTO_TEST_CASE(varints_bitpatterns)
@@ -211,33 +243,76 @@ BOOST_AUTO_TEST_CASE(noncanonical)
     std::vector<char>::size_type n;
 
     // zero encoded with three bytes:
-    ss << Span{"\xfd\x00\x00"}.first(3);
+    ss << std::span{"\xfd\x00\x00"}.first(3);
     BOOST_CHECK_EXCEPTION(ReadCompactSize(ss), std::ios_base::failure, isCanonicalException);
 
     // 0xfc encoded with three bytes:
-    ss << Span{"\xfd\xfc\x00"}.first(3);
+    ss << std::span{"\xfd\xfc\x00"}.first(3);
     BOOST_CHECK_EXCEPTION(ReadCompactSize(ss), std::ios_base::failure, isCanonicalException);
 
     // 0xfd encoded with three bytes is OK:
-    ss << Span{"\xfd\xfd\x00"}.first(3);
+    ss << std::span{"\xfd\xfd\x00"}.first(3);
     n = ReadCompactSize(ss);
     BOOST_CHECK(n == 0xfd);
 
     // zero encoded with five bytes:
-    ss << Span{"\xfe\x00\x00\x00\x00"}.first(5);
+    ss << std::span{"\xfe\x00\x00\x00\x00"}.first(5);
     BOOST_CHECK_EXCEPTION(ReadCompactSize(ss), std::ios_base::failure, isCanonicalException);
 
     // 0xffff encoded with five bytes:
-    ss << Span{"\xfe\xff\xff\x00\x00"}.first(5);
+    ss << std::span{"\xfe\xff\xff\x00\x00"}.first(5);
     BOOST_CHECK_EXCEPTION(ReadCompactSize(ss), std::ios_base::failure, isCanonicalException);
 
     // zero encoded with nine bytes:
-    ss << Span{"\xff\x00\x00\x00\x00\x00\x00\x00\x00"}.first(9);
+    ss << std::span{"\xff\x00\x00\x00\x00\x00\x00\x00\x00"}.first(9);
     BOOST_CHECK_EXCEPTION(ReadCompactSize(ss), std::ios_base::failure, isCanonicalException);
 
     // 0x01ffffff encoded with nine bytes:
-    ss << Span{"\xff\xff\xff\xff\x01\x00\x00\x00\x00"}.first(9);
+    ss << std::span{"\xff\xff\xff\xff\x01\x00\x00\x00\x00"}.first(9);
     BOOST_CHECK_EXCEPTION(ReadCompactSize(ss), std::ios_base::failure, isCanonicalException);
+}
+
+BOOST_AUTO_TEST_CASE(truncated_compact_size)
+{
+    // A CompactSize prefix followed by fewer bytes than it announces fails to read.
+    for (const char* hex : {"fd", "fd01", "fe010000", "ff01000000000000"}) {
+        DataStream ss{ParseHex(hex)};
+        BOOST_CHECK_EXCEPTION(ReadCompactSize(ss), std::ios_base::failure, HasReason{"end of data"});
+    }
+}
+
+BOOST_AUTO_TEST_CASE(string_view)
+{
+    const std::string_view sv{"hello, world"};
+    DataStream ss;
+    ss << sv;
+    std::string s;
+    ss >> s;
+    BOOST_CHECK_EQUAL(sv, s);
+}
+
+BOOST_AUTO_TEST_CASE(limited_vector)
+{
+    const std::vector<int> v = {1,2,3,4,-5,-6,-7,-8,-9,-10,10000,20000,-30000};
+
+    auto check = [&]<size_t N>() {
+        DataStream ss;
+        ss << v;
+        try {
+            std::vector<int> r;
+            ss >> LIMITED_VECTOR(r, N);
+            BOOST_CHECK_LE(r.size(), N);
+            BOOST_CHECK(std::ranges::equal(r, v));
+        } catch (const std::ios_base::failure&) {
+            BOOST_CHECK_GT(v.size(), N);
+        }
+    };
+    check.operator()<0>();
+    check.operator()<10>();
+    check.operator()<12>();
+    check.operator()<13>();
+    check.operator()<14>();
+    check.operator()<100>();
 }
 
 BOOST_AUTO_TEST_CASE(class_methods)
@@ -269,10 +344,10 @@ BOOST_AUTO_TEST_CASE(class_methods)
     {
         DataStream ds;
         const std::string in{"ab"};
-        ds << Span{in} << std::byte{'c'};
+        ds << std::span{in} << std::byte{'c'};
         std::array<std::byte, 2> out;
         std::byte out_3;
-        ds >> Span{out} >> out_3;
+        ds >> std::span{out} >> out_3;
         BOOST_CHECK_EQUAL(out.at(0), std::byte{'a'});
         BOOST_CHECK_EQUAL(out.at(1), std::byte{'b'});
         BOOST_CHECK_EQUAL(out_3, std::byte{'c'});
@@ -304,7 +379,7 @@ public:
         if (s.template GetParams<BaseFormat>().m_base_format == BaseFormat::RAW) {
             s << m_base_data;
         } else {
-            s << std::span<const char>{HexStr(Span{&m_base_data, 1})};
+            s << std::span<const char>{HexStr(std::span{&m_base_data, 1})};
         }
     }
 
@@ -315,7 +390,7 @@ public:
             s >> m_base_data;
         } else {
             std::string hex{"aa"};
-            s >> Span{hex}.first(hex.size());
+            s >> std::span{hex}.first(hex.size());
             m_base_data = TryParseHex<uint8_t>(hex).value().at(0);
         }
     }

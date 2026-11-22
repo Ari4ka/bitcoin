@@ -6,13 +6,16 @@
 #ifndef BITCOIN_COMMON_SYSTEM_H
 #define BITCOIN_COMMON_SYSTEM_H
 
-#include <bitcoin-build-config.h> // IWYU pragma: keep
+#include <bitcoin-build-config.h>
+
+#include <util/time.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
-// Application startup time (used for uptime calculation)
-int64_t GetStartupTime();
+/// Monotonic uptime (not affected by system time changes).
+SteadyClock::duration GetUptime();
 
 void SetupEnvironment();
 [[nodiscard]] bool SetupNetworking();
@@ -28,5 +31,10 @@ void runCommand(const std::string& strCommand);
  * @note This does count virtual cores, such as those provided by HyperThreading.
  */
 int GetNumCores();
+
+/**
+ * Return the total RAM available on the current system, if detectable.
+ */
+std::optional<uint64_t> TryGetTotalRam();
 
 #endif // BITCOIN_COMMON_SYSTEM_H

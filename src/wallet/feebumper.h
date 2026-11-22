@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 The Bitcoin Core developers
+// Copyright (c) 2017-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -6,8 +6,9 @@
 #define BITCOIN_WALLET_FEEBUMPER_H
 
 #include <consensus/consensus.h>
-#include <script/interpreter.h>
 #include <primitives/transaction.h>
+#include <script/interpreter.h>
+#include <util/check.h>
 
 class uint256;
 enum class FeeEstimateMode;
@@ -31,7 +32,7 @@ enum class Result
 };
 
 //! Return whether transaction can be bumped.
-bool TransactionCanBeBumped(const CWallet& wallet, const uint256& txid);
+bool TransactionCanBeBumped(const CWallet& wallet, const Txid& txid);
 
 /** Create bumpfee transaction based on feerate estimates.
  *
@@ -47,7 +48,7 @@ bool TransactionCanBeBumped(const CWallet& wallet, const uint256& txid);
  * @param[in] original_change_index The position of the change output to deduct the fee from in the transaction being bumped
  */
 Result CreateRateBumpTransaction(CWallet& wallet,
-    const uint256& txid,
+    const Txid& txid,
     const CCoinControl& coin_control,
     std::vector<bilingual_str>& errors,
     CAmount& old_fee,
@@ -67,10 +68,10 @@ bool SignTransaction(CWallet& wallet, CMutableTransaction& mtx);
 //! but sets errors if the tx could not be added to the mempool (will try later)
 //! or if the old transaction could not be marked as replaced.
 Result CommitTransaction(CWallet& wallet,
-    const uint256& txid,
+    const Txid& txid,
     CMutableTransaction&& mtx,
     std::vector<bilingual_str>& errors,
-    uint256& bumped_txid);
+    Txid& bumped_txid);
 
 struct SignatureWeights
 {
@@ -92,7 +93,7 @@ public:
             break;
         case SigVersion::TAPROOT:
         case SigVersion::TAPSCRIPT:
-            assert(false);
+            AssertUnreachable();
         }
     }
 

@@ -15,7 +15,6 @@ function(test_append_socket_library target)
   endif()
 
   set(check_socket_source "
-    #include <sys/types.h>
     #include <ifaddrs.h>
 
     int main() {
@@ -38,8 +37,7 @@ function(test_append_socket_library target)
       message(FATAL_ERROR "Cannot figure out how to use getifaddrs/freeifaddrs.")
     endif()
   endif()
-  set(HAVE_DECL_GETIFADDRS TRUE PARENT_SCOPE)
-  set(HAVE_DECL_FREEIFADDRS TRUE PARENT_SCOPE)
+  set(HAVE_IFADDRS TRUE PARENT_SCOPE)
 endfunction()
 
 # Clang, when building for 32-bit,
@@ -71,7 +69,7 @@ function(test_append_atomic_library target)
 
       std::atomic<double> d{};
       d.store(3.14);
-      auto d1 = d.load();
+      [[maybe_unused]] auto d1 = d.load();
 
       std::atomic<int64_t> a{};
       int64_t v = 5;

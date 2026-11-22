@@ -17,6 +17,9 @@ Unpack the files into a directory and run:
 
 - `bin/bitcoin-qt` (GUI) or
 - `bin/bitcoind` (headless)
+- `bin/bitcoin` (wrapper command)
+
+The `bitcoin` command supports subcommands like `bitcoin gui`, `bitcoin node`, and `bitcoin rpc` exposing different functionality. Subcommands can be listed with `bitcoin help`.
 
 ### Windows
 
@@ -41,10 +44,7 @@ The following are developer notes on how to build Bitcoin Core on your native pl
 - [Dependencies](dependencies.md)
 - [macOS Build Notes](build-osx.md)
 - [Unix Build Notes](build-unix.md)
-- [Windows Build Notes](build-windows-msvc.md)
-- [FreeBSD Build Notes](build-freebsd.md)
-- [OpenBSD Build Notes](build-openbsd.md)
-- [NetBSD Build Notes](build-netbsd.md)
+- [Windows Build Notes](build-windows-native.md)
 
 Development
 ---------------------

@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2022 The Bitcoin Core developers
+// Copyright (c) 2011-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -72,7 +72,6 @@ public:
     //! Return number of connections, default is in- and outbound (total)
     int getNumConnections(unsigned int flags = CONNECTIONS_ALL) const;
     std::map<CNetAddr, LocalServiceInfo> getNetLocalAddresses() const;
-    int getNumBlocks() const;
     uint256 getBestBlockHash() EXCLUSIVE_LOCKS_REQUIRED(!m_cached_tip_mutex);
     int getHeaderTipHeight() const;
     int64_t getHeaderTipTime() const;
@@ -84,7 +83,6 @@ public:
 
     QString formatFullVersion() const;
     QString formatSubVersion() const;
-    bool isReleaseVersion() const;
     QString formatClientStartupTime() const;
     QString dataDir() const;
     QString blocksDir() const;
@@ -94,7 +92,6 @@ public:
     // caches for the best header: hash, number of blocks and block time
     mutable std::atomic<int> cachedBestHeaderHeight;
     mutable std::atomic<int64_t> cachedBestHeaderTime;
-    mutable std::atomic<int> m_cached_num_blocks{-1};
 
     Mutex m_cached_tip_mutex;
     uint256 m_cached_tip_blocks GUARDED_BY(m_cached_tip_mutex){};

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2020-2022 The Bitcoin Core developers
+# Copyright (c) 2020-present The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test coinstatsindex across nodes.
@@ -27,6 +27,7 @@ from test_framework.script import (
 )
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
+    assert_not_equal,
     assert_equal,
     assert_raises_rpc_error,
 )
@@ -40,7 +41,6 @@ class CoinStatsIndexTest(BitcoinTestFramework):
     def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 2
-        self.supports_cli = False
         self.extra_args = [
             [],
             ["-coinstatsindex"]
@@ -62,7 +62,7 @@ class CoinStatsIndexTest(BitcoinTestFramework):
         )
 
     def sync_index_node(self):
-        self.wait_until(lambda: self.nodes[1].getindexinfo()['coinstatsindex']['synced'] is True)
+        self.wait_for_index_sync([self.nodes[1]])
 
     def _test_coin_stats_index(self):
         node = self.nodes[0]
@@ -190,12 +190,11 @@ class CoinStatsIndexTest(BitcoinTestFramework):
         # has two outputs
         cb = create_coinbase(109, nValue=35)
         cb.vout.append(CTxOut(5 * COIN, CScript([OP_FALSE])))
-        cb.rehash()
 
         # Generate a block that includes previous coinbase
         tip = self.nodes[0].getbestblockhash()
         block_time = self.nodes[0].getblock(tip)['time'] + 1
-        block = create_block(int(tip, 16), cb, block_time)
+        block = create_block(int(tip, 16), cb, ntime=block_time)
         block.solve()
         self.nodes[0].submitblock(block.serialize().hex())
         self.sync_all()
@@ -231,14 +230,12 @@ class CoinStatsIndexTest(BitcoinTestFramework):
         self.log.info("Test that the index works with -reindex")
 
         self.restart_node(1, extra_args=["-coinstatsindex", "-reindex"])
-        self.sync_index_node()
         res11 = index_node.gettxoutsetinfo('muhash')
         assert_equal(res11, res10)
 
         self.log.info("Test that the index works with -reindex-chainstate")
 
         self.restart_node(1, extra_args=["-coinstatsindex", "-reindex-chainstate"])
-        self.sync_index_node()
         res12 = index_node.gettxoutsetinfo('muhash')
         assert_equal(res12, res10)
 
@@ -262,7 +259,6 @@ class CoinStatsIndexTest(BitcoinTestFramework):
         index_node = self.nodes[1]
         reorg_blocks = self.generatetoaddress(index_node, 2, getnewdestination()[2])
         reorg_block = reorg_blocks[1]
-        self.sync_index_node()
         res_invalid = index_node.gettxoutsetinfo('muhash')
         index_node.invalidateblock(reorg_blocks[0])
         assert_equal(index_node.gettxoutsetinfo('muhash')['height'], 110)
@@ -275,12 +271,12 @@ class CoinStatsIndexTest(BitcoinTestFramework):
         res2 = index_node.gettxoutsetinfo(hash_type='muhash', hash_or_height=112)
         assert_equal(res["bestblock"], block)
         assert_equal(res["muhash"], res2["muhash"])
-        assert res["muhash"] != res_invalid["muhash"]
+        assert_not_equal(res["muhash"], res_invalid["muhash"])
 
         # Test that requesting reorged out block by hash is still returning correct results
         res_invalid2 = index_node.gettxoutsetinfo(hash_type='muhash', hash_or_height=reorg_block)
         assert_equal(res_invalid2["muhash"], res_invalid["muhash"])
-        assert res["muhash"] != res_invalid2["muhash"]
+        assert_not_equal(res["muhash"], res_invalid2["muhash"])
 
         # Add another block, so we don't depend on reconsiderblock remembering which
         # blocks were touched by invalidateblock
@@ -318,9 +314,22 @@ class CoinStatsIndexTest(BitcoinTestFramework):
 
         # Restart with index that still has its best block on the old chain
         self.restart_node(1, extra_args=self.extra_args[1])
-        self.sync_index_node()
         res1 = index_node.gettxoutsetinfo(hash_type='muhash', hash_or_height=None, use_index=True)
         assert_equal(res["muhash"], res1["muhash"])
+
+        self.log.info("Test index with an unclean restart after a reorg")
+        self.restart_node(1, extra_args=self.extra_args[1])
+        committed_height = index_node.getblockcount()
+        self.generate(index_node, 2, sync_fun=self.no_op)
+        self.sync_index_node()
+        block2 = index_node.getbestblockhash()
+        index_node.invalidateblock(block2)
+        self.generatetoaddress(index_node, 1, getnewdestination()[2], sync_fun=self.no_op)
+        self.sync_index_node()
+        index_node.kill_process()
+        self.start_node(1, extra_args=self.extra_args[1])
+        # Because of the unclean shutdown above, indexes reset to the point we last committed them to disk.
+        assert_equal(index_node.getindexinfo()['coinstatsindex']['best_block_height'], committed_height)
 
 
 if __name__ == '__main__':

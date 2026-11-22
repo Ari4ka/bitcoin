@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2022 The Bitcoin Core developers
+// Copyright (c) 2020-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -43,5 +43,5 @@ bool PeerTableSortProxy::lessThan(const QModelIndex& left_index, const QModelInd
     case PeerTableModel::Subversion:
         return left_stats.cleanSubVer.compare(right_stats.cleanSubVer) < 0;
     } // no default case, so the compiler can warn about missing cases
-    assert(false);
+    AssertUnreachable();
 }

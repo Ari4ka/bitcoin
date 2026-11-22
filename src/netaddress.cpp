@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2022 The Bitcoin Core developers
+// Copyright (c) 2009-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -10,6 +10,7 @@
 #include <hash.h>
 #include <prevector.h>
 #include <tinyformat.h>
+#include <util/check.h>
 #include <util/strencodings.h>
 #include <util/string.h>
 
@@ -18,9 +19,10 @@
 #include <cstdint>
 #include <ios>
 #include <iterator>
+#include <string_view>
 #include <tuple>
 
-using util::ContainsNoNUL;
+using util::ContainsNUL;
 using util::HasPrefix;
 
 CNetAddr::BIP155Network CNetAddr::GetBIP155Network() const
@@ -39,10 +41,10 @@ CNetAddr::BIP155Network CNetAddr::GetBIP155Network() const
     case NET_INTERNAL:   // should have been handled before calling this function
     case NET_UNROUTABLE: // m_net is never and should not be set to NET_UNROUTABLE
     case NET_MAX:        // m_net is never and should not be set to NET_MAX
-        assert(false);
+        AssertUnreachable();
     } // no default case, so the compiler can warn about missing cases
 
-    assert(false);
+    AssertUnreachable();
 }
 
 bool CNetAddr::SetNetFromBIP155Network(uint8_t possible_bip155_net, size_t address_size)
@@ -127,14 +129,14 @@ void CNetAddr::SetIP(const CNetAddr& ipIn)
         break;
     case NET_UNROUTABLE:
     case NET_MAX:
-        assert(false);
+        AssertUnreachable();
     } // no default case, so the compiler can warn about missing cases
 
     m_net = ipIn.m_net;
     m_addr = ipIn.m_addr;
 }
 
-void CNetAddr::SetLegacyIPv6(Span<const uint8_t> ipv6)
+void CNetAddr::SetLegacyIPv6(std::span<const uint8_t> ipv6)
 {
     assert(ipv6.size() == ADDR_IPV6_SIZE);
 
@@ -182,12 +184,12 @@ bool CNetAddr::SetInternal(const std::string &name)
 }
 
 namespace torv3 {
-// https://gitweb.torproject.org/torspec.git/tree/rend-spec-v3.txt?id=7116c9cdaba248aae07a3f1d0e15d9dd102f62c5#n2175
+// https://gitlab.torproject.org/tpo/core/torspec/-/tree/main/spec/rend-spec
 static constexpr size_t CHECKSUM_LEN = 2;
 static const unsigned char VERSION[] = {3};
 static constexpr size_t TOTAL_LEN = ADDR_TORV3_SIZE + CHECKSUM_LEN + sizeof(VERSION);
 
-static void Checksum(Span<const uint8_t> addr_pubkey, uint8_t (&checksum)[CHECKSUM_LEN])
+static void Checksum(std::span<const uint8_t> addr_pubkey, uint8_t (&checksum)[CHECKSUM_LEN])
 {
     // TORv3 CHECKSUM = H(".onion checksum" | PUBKEY | VERSION)[:2]
     static const unsigned char prefix[] = ".onion checksum";
@@ -195,7 +197,7 @@ static void Checksum(Span<const uint8_t> addr_pubkey, uint8_t (&checksum)[CHECKS
 
     SHA3_256 hasher;
 
-    hasher.Write(Span{prefix}.first(prefix_len));
+    hasher.Write(std::span{prefix}.first(prefix_len));
     hasher.Write(addr_pubkey);
     hasher.Write(VERSION);
 
@@ -208,9 +210,9 @@ static void Checksum(Span<const uint8_t> addr_pubkey, uint8_t (&checksum)[CHECKS
 
 }; // namespace torv3
 
-bool CNetAddr::SetSpecial(const std::string& addr)
+bool CNetAddr::SetSpecial(std::string_view addr)
 {
-    if (!ContainsNoNUL(addr)) {
+    if (ContainsNUL(addr)) {
         return false;
     }
 
@@ -225,25 +227,21 @@ bool CNetAddr::SetSpecial(const std::string& addr)
     return false;
 }
 
-bool CNetAddr::SetTor(const std::string& addr)
+bool CNetAddr::SetTor(std::string_view addr)
 {
-    static const char* suffix{".onion"};
-    static constexpr size_t suffix_len{6};
-
-    if (addr.size() <= suffix_len || addr.substr(addr.size() - suffix_len) != suffix) {
-        return false;
-    }
-
-    auto input = DecodeBase32(std::string_view{addr}.substr(0, addr.size() - suffix_len));
+    static constexpr std::string_view suffix{".onion"};
+    if (addr.size() < suffix.size() || ToLower(addr.substr(addr.size() - suffix.size())) != suffix) return false;
+    addr.remove_suffix(suffix.size());
+    auto input = DecodeBase32(addr);
 
     if (!input) {
         return false;
     }
 
     if (input->size() == torv3::TOTAL_LEN) {
-        Span<const uint8_t> input_pubkey{input->data(), ADDR_TORV3_SIZE};
-        Span<const uint8_t> input_checksum{input->data() + ADDR_TORV3_SIZE, torv3::CHECKSUM_LEN};
-        Span<const uint8_t> input_version{input->data() + ADDR_TORV3_SIZE + torv3::CHECKSUM_LEN, sizeof(torv3::VERSION)};
+        std::span<const uint8_t> input_pubkey{input->data(), ADDR_TORV3_SIZE};
+        std::span<const uint8_t> input_checksum{input->data() + ADDR_TORV3_SIZE, torv3::CHECKSUM_LEN};
+        std::span<const uint8_t> input_version{input->data() + ADDR_TORV3_SIZE + torv3::CHECKSUM_LEN, sizeof(torv3::VERSION)};
 
         if (!std::ranges::equal(input_version, torv3::VERSION)) {
             return false;
@@ -264,7 +262,7 @@ bool CNetAddr::SetTor(const std::string& addr)
     return false;
 }
 
-bool CNetAddr::SetI2P(const std::string& addr)
+bool CNetAddr::SetI2P(std::string_view addr)
 {
     // I2P addresses that we support consist of 52 base32 characters + ".b32.i2p".
     static constexpr size_t b32_len{52};
@@ -277,7 +275,7 @@ bool CNetAddr::SetI2P(const std::string& addr)
 
     // Remove the ".b32.i2p" suffix and pad to a multiple of 8 chars, so DecodeBase32()
     // can decode it.
-    const std::string b32_padded = addr.substr(0, b32_len) + "====";
+    const std::string b32_padded{tfm::format("%s====", addr.substr(0, b32_len))};
 
     auto address_bytes = DecodeBase32(b32_padded);
 
@@ -345,6 +343,12 @@ bool CNetAddr::IsRFC5737() const
 bool CNetAddr::IsRFC3849() const
 {
     return IsIPv6() && HasPrefix(m_addr, std::array<uint8_t, 4>{0x20, 0x01, 0x0D, 0xB8});
+}
+
+bool CNetAddr::IsRFC9637() const
+{
+    return IsIPv6() && HasPrefix(m_addr, std::array<uint8_t, 2>{0x3F, 0xFF}) &&
+           (m_addr[2] & 0xF0) == 0x00;
 }
 
 bool CNetAddr::IsRFC3964() const
@@ -438,7 +442,7 @@ bool CNetAddr::IsValid() const
     }
 
     // documentation IPv6 address
-    if (IsRFC3849())
+    if (IsRFC3849() || IsRFC9637())
         return false;
 
     if (IsInternal())
@@ -491,10 +495,10 @@ bool CNetAddr::IsAddrV1Compatible() const
         return false;
     case NET_UNROUTABLE: // m_net is never and should not be set to NET_UNROUTABLE
     case NET_MAX:        // m_net is never and should not be set to NET_MAX
-        assert(false);
+        AssertUnreachable();
     } // no default case, so the compiler can warn about missing cases
 
-    assert(false);
+    AssertUnreachable();
 }
 
 enum Network CNetAddr::GetNetwork() const
@@ -508,14 +512,14 @@ enum Network CNetAddr::GetNetwork() const
     return m_net;
 }
 
-static std::string IPv4ToString(Span<const uint8_t> a)
+static std::string IPv4ToString(std::span<const uint8_t> a)
 {
     return strprintf("%u.%u.%u.%u", a[0], a[1], a[2], a[3]);
 }
 
 // Return an IPv6 address text representation with zero compression as described in RFC 5952
 // ("A Recommendation for IPv6 Address Text Representation").
-static std::string IPv6ToString(Span<const uint8_t> a, uint32_t scope_id)
+static std::string IPv6ToString(std::span<const uint8_t> a, uint32_t scope_id)
 {
     assert(a.size() == ADDR_IPV6_SIZE);
     const std::array groups{
@@ -570,7 +574,7 @@ static std::string IPv6ToString(Span<const uint8_t> a, uint32_t scope_id)
     return r;
 }
 
-std::string OnionToString(Span<const uint8_t> addr)
+std::string OnionToString(std::span<const uint8_t> addr)
 {
     uint8_t checksum[torv3::CHECKSUM_LEN];
     torv3::Checksum(addr, checksum);
@@ -598,10 +602,10 @@ std::string CNetAddr::ToStringAddr() const
         return EncodeBase32(m_addr) + ".internal";
     case NET_UNROUTABLE: // m_net is never and should not be set to NET_UNROUTABLE
     case NET_MAX:        // m_net is never and should not be set to NET_MAX
-        assert(false);
+        AssertUnreachable();
     } // no default case, so the compiler can warn about missing cases
 
-    assert(false);
+    AssertUnreachable();
 }
 
 bool operator==(const CNetAddr& a, const CNetAddr& b)
@@ -664,15 +668,15 @@ uint32_t CNetAddr::GetLinkedIPv4() const
         return ReadBE32(m_addr.data());
     } else if (IsRFC6052() || IsRFC6145()) {
         // mapped IPv4, SIIT translated IPv4: the IPv4 address is the last 4 bytes of the address
-        return ReadBE32(Span{m_addr}.last(ADDR_IPV4_SIZE).data());
+        return ReadBE32(std::span{m_addr}.last(ADDR_IPV4_SIZE).data());
     } else if (IsRFC3964()) {
         // 6to4 tunneled IPv4: the IPv4 address is in bytes 2-6
-        return ReadBE32(Span{m_addr}.subspan(2, ADDR_IPV4_SIZE).data());
+        return ReadBE32(std::span{m_addr}.subspan(2, ADDR_IPV4_SIZE).data());
     } else if (IsRFC4380()) {
         // Teredo tunneled IPv4: the IPv4 address is in the last 4 bytes of the address, but bitflipped
-        return ~ReadBE32(Span{m_addr}.last(ADDR_IPV4_SIZE).data());
+        return ~ReadBE32(std::span{m_addr}.last(ADDR_IPV4_SIZE).data());
     }
-    assert(false);
+    AssertUnreachable();
 }
 
 Network CNetAddr::GetNetClass() const

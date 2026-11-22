@@ -1,10 +1,12 @@
-// Copyright (c) 2011-2022 The Bitcoin Core developers
+// Copyright (c) 2011-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <bitcoin-build-config.h> // IWYU pragma: keep
+#include <bitcoin-build-config.h>
 
 #include <qt/notificator.h>
+
+#include <attributes.h>
 
 #include <QApplication>
 #include <QByteArray>
@@ -18,7 +20,7 @@
 #ifdef USE_DBUS
 #include <QDBusMetaType>
 #include <QtDBus>
-#include <stdint.h>
+#include <cstdint>
 #endif
 #ifdef Q_OS_MACOS
 #include <qt/macnotificationhandler.h>
@@ -82,8 +84,8 @@ private:
     int bitsPerSample;
     QByteArray image;
 
-    friend QDBusArgument &operator<<(QDBusArgument &a, const FreedesktopImage &i);
-    friend const QDBusArgument &operator>>(const QDBusArgument &a, FreedesktopImage &i);
+    friend QDBusArgument& operator<<(QDBusArgument& a, const FreedesktopImage& i);
+    friend const QDBusArgument& operator>>(const QDBusArgument& a LIFETIMEBOUND, FreedesktopImage& i);
 };
 
 Q_DECLARE_METATYPE(FreedesktopImage);
@@ -141,7 +143,6 @@ QVariant FreedesktopImage::toVariant(const QImage &img)
 
 void Notificator::notifyDBus(Class cls, const QString &title, const QString &text, const QIcon &icon, int millisTimeout)
 {
-    // https://developer.gnome.org/notification-spec/
     // Arguments for DBus "Notify" call:
     QList<QVariant> args;
 
@@ -177,8 +178,7 @@ void Notificator::notifyDBus(Class cls, const QString &title, const QString &tex
         case Information: sicon = QStyle::SP_MessageBoxInformation; break;
         case Warning: sicon = QStyle::SP_MessageBoxWarning; break;
         case Critical: sicon = QStyle::SP_MessageBoxCritical; break;
-        default: break;
-        }
+        } // no default case, so the compiler can warn about missing cases
         tmpicon = QApplication::style()->standardIcon(sicon);
     }
     else

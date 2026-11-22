@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2014-2021 The Bitcoin Core developers
+# Copyright (c) 2014-present The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test running bitcoind with -reindex and -reindex-chainstate options.
@@ -20,6 +20,7 @@ from test_framework.util import (
 
 class ReindexTest(BitcoinTestFramework):
     def set_test_params(self):
+        self.rpc_timeout *= 2  # To avoid timeout when generating the reindex chain
         self.setup_clean_chain = True
         self.num_nodes = 1
 
@@ -87,14 +88,14 @@ class ReindexTest(BitcoinTestFramework):
         node.stop_node()
         with node.busy_wait_for_debug_log([b'initload thread start']):
             node.start(['-blockfilterindex', '-reindex'])
-            node.wait_for_rpc_connection(wait_for_import=False)
+            node.wait_for_rpc_connection(wait_for_full_init=False)
         node.stop_node()
 
         # Start node without the reindex flag and verify it does not wipe the indexes data again
         db_path = node.chain_path / 'indexes' / 'blockfilter' / 'basic' / 'db'
         with node.assert_debug_log(expected_msgs=[f'Opening LevelDB in {db_path}'], unexpected_msgs=[f'Wiping LevelDB in {db_path}']):
             node.start(['-blockfilterindex'])
-            node.wait_for_rpc_connection(wait_for_import=False)
+            node.wait_for_rpc_connection(wait_for_full_init=False)
         node.stop_node()
 
     def run_test(self):

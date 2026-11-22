@@ -1,11 +1,12 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2022 The Bitcoin Core developers
+// Copyright (c) 2009-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <protocol.h>
 
 #include <common/system.h>
+#include <util/check.h>
 
 CMessageHeader::CMessageHeader(const MessageStartChars& pchMessageStartIn, const char* msg_type, unsigned int nMessageSizeIn)
     : pchMessageStart{pchMessageStartIn}
@@ -92,7 +93,7 @@ static std::string serviceFlagToStr(size_t bit)
 {
     const uint64_t service_flag = 1ULL << bit;
     switch ((ServiceFlags)service_flag) {
-    case NODE_NONE: abort();  // impossible
+    case NODE_NONE: AssertUnreachable();
     case NODE_NETWORK:         return "NETWORK";
     case NODE_BLOOM:           return "BLOOM";
     case NODE_WITNESS:         return "WITNESS";
@@ -121,5 +122,5 @@ std::vector<std::string> serviceFlagsToStr(uint64_t flags)
 GenTxid ToGenTxid(const CInv& inv)
 {
     assert(inv.IsGenTxMsg());
-    return inv.IsMsgWtx() ? GenTxid::Wtxid(inv.hash) : GenTxid::Txid(inv.hash);
+    return inv.IsMsgWtx() ? GenTxid{Wtxid::FromUint256(inv.hash)} : GenTxid{Txid::FromUint256(inv.hash)};
 }

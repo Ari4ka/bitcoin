@@ -1,14 +1,16 @@
-// Copyright (c) 2020-2021 The Bitcoin Core developers
+// Copyright (c) 2020-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <arith_uint256.h>
 #include <crypto/muhash.h>
+
+#include <arith_uint256.h>
 #include <span.h>
-#include <uint256.h>
 #include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/fuzz.h>
 #include <test/fuzz/util.h>
+#include <uint256.h>
+#include <util/check.h>
 
 #include <algorithm>
 #include <array>
@@ -25,7 +27,7 @@ public:
 
     /** Construct an arith_uint6144 from any multiple of 4 bytes in LE notation,
      *  up to 768 bytes. */
-    arith_uint6144(Span<const uint8_t> bytes) : base_uint{}
+    arith_uint6144(std::span<const uint8_t> bytes) : base_uint{}
     {
         assert(bytes.size() % 4 == 0);
         assert(bytes.size() <= 768);
@@ -36,7 +38,7 @@ public:
 
     /** Serialize an arithm_uint6144 to any multiply of 4 bytes in LE notation,
      *  on the condition that the represented number fits. */
-    void Serialize(Span<uint8_t> bytes) {
+    void Serialize(std::span<uint8_t> bytes) {
         assert(bytes.size() % 4 == 0);
         assert(bytes.size() <= 768);
         for (unsigned i = 0; i * 4 < bytes.size(); ++i) {
@@ -198,25 +200,16 @@ FUZZ_TARGET(muhash)
             muhash3.Finalize(out2);
         },
         [&] {
-            // Test that dividing a MuHash by itself brings it back to it's initial state
-
-            // See note about clang + self-assignment in test/uint256_tests.cpp
-            #if defined(__clang__)
-            #    pragma clang diagnostic push
-            #    pragma clang diagnostic ignored "-Wself-assign-overloaded"
-            #endif
-
+            // Test that dividing a MuHash by itself brings it back to its initial state
+            // Insert only multiplies the numerator, so without the Remove the denominator
+            // is still 1 and the division is trivially correct
+            muhash.Remove(data);
             muhash /= muhash;
-
-            #if defined(__clang__)
-            #    pragma clang diagnostic pop
-            #endif
-
             muhash.Finalize(out);
             out2 = initial_state_hash;
         },
         [&] {
-            // Test that removing all added elements brings the object back to it's initial state
+            // Test that removing all added elements brings the object back to its initial state
             muhash.Remove(data);
             muhash.Remove(data2);
             muhash.Finalize(out);

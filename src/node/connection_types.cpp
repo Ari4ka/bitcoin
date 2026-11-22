@@ -1,9 +1,10 @@
-// Copyright (c) 2022 The Bitcoin Core developers
+// Copyright (c) 2022-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <node/connection_types.h>
-#include <cassert>
+
+#include <util/check.h>
 
 std::string ConnectionTypeAsString(ConnectionType conn_type)
 {
@@ -20,9 +21,11 @@ std::string ConnectionTypeAsString(ConnectionType conn_type)
         return "block-relay-only";
     case ConnectionType::ADDR_FETCH:
         return "addr-fetch";
+    case ConnectionType::PRIVATE_BROADCAST:
+        return "private-broadcast";
     } // no default case, so the compiler can warn about missing cases
 
-    assert(false);
+    AssertUnreachable();
 }
 
 std::string TransportTypeAsString(TransportProtocolType transport_type)
@@ -36,5 +39,5 @@ std::string TransportTypeAsString(TransportProtocolType transport_type)
         return "v2";
     } // no default case, so the compiler can warn about missing cases
 
-    assert(false);
+    AssertUnreachable();
 }

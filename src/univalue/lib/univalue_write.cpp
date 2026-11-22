@@ -5,7 +5,6 @@
 #include <univalue.h>
 #include <univalue_escapes.h>
 
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -70,48 +69,48 @@ static void indentStr(unsigned int prettyIndent, unsigned int indentLevel, std::
 // NOLINTNEXTLINE(misc-no-recursion)
 void UniValue::writeArray(unsigned int prettyIndent, unsigned int indentLevel, std::string& s) const
 {
-    s += "[";
+    s += '[';
     if (prettyIndent)
-        s += "\n";
+        s += '\n';
 
     for (unsigned int i = 0; i < values.size(); i++) {
         if (prettyIndent)
             indentStr(prettyIndent, indentLevel, s);
         s += values[i].write(prettyIndent, indentLevel + 1);
         if (i != (values.size() - 1)) {
-            s += ",";
+            s += ',';
         }
         if (prettyIndent)
-            s += "\n";
+            s += '\n';
     }
 
     if (prettyIndent)
         indentStr(prettyIndent, indentLevel - 1, s);
-    s += "]";
+    s += ']';
 }
 
 // NOLINTNEXTLINE(misc-no-recursion)
 void UniValue::writeObject(unsigned int prettyIndent, unsigned int indentLevel, std::string& s) const
 {
-    s += "{";
+    s += '{';
     if (prettyIndent)
-        s += "\n";
+        s += '\n';
 
     for (unsigned int i = 0; i < keys.size(); i++) {
         if (prettyIndent)
             indentStr(prettyIndent, indentLevel, s);
         s += "\"" + json_escape(keys[i]) + "\":";
         if (prettyIndent)
-            s += " ";
+            s += ' ';
         s += values.at(i).write(prettyIndent, indentLevel + 1);
         if (i != (values.size() - 1))
-            s += ",";
+            s += ',';
         if (prettyIndent)
-            s += "\n";
+            s += '\n';
     }
 
     if (prettyIndent)
         indentStr(prettyIndent, indentLevel - 1, s);
-    s += "}";
+    s += '}';
 }
 

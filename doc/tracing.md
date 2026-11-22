@@ -45,7 +45,7 @@ The two main eBPF front-ends with support for USDT are [bpftrace] and
 `bpftrace` is preferred for one-liners and shorter scripts. Examples for both can
 be found in [contrib/tracing].
 
-[bpftrace]: https://github.com/iovisor/bpftrace
+[bpftrace]: https://github.com/bpftrace/bpftrace
 [BPF Compiler Collection (BCC)]: https://github.com/iovisor/bcc
 [contrib/tracing]: ../contrib/tracing/
 
@@ -73,7 +73,7 @@ Arguments passed:
 
 Note: The message is passed to the tracepoint in full, however, due to space
 limitations in the eBPF kernel VM it might not be possible to pass the message
-to user-space in full. Messages longer than a 32kb might be cut off. This can
+to user-space in full. Messages longer than 32kb might be cut off. This can
 be detected in tracing scripts by comparing the message size to the length of
 the passed message.
 
@@ -92,7 +92,7 @@ Arguments passed:
 
 Note: The message is passed to the tracepoint in full, however, due to space
 limitations in the eBPF kernel VM it might not be possible to pass the message
-to user-space in full. Messages longer than a 32kb might be cut off. This can
+to user-space in full. Messages longer than 32kb might be cut off. This can
 be detected in tracing scripts by comparing the message size to the length of
 the passed message.
 
@@ -122,7 +122,7 @@ Arguments passed:
 
 #### Tracepoint `net:evicted_inbound_connection`
 
-Is called when a inbound connection is evicted by us. Passes information about the evicted peer and the time at connection establishment.
+Is called when an inbound connection is evicted by us. Passes information about the evicted peer and the time at connection establishment.
 
 Arguments passed:
 1. Peer ID as `int64`
@@ -185,8 +185,8 @@ Is called *after* the in-memory UTXO cache is flushed.
 
 Arguments passed:
 1. Time it took to flush the cache microseconds as `int64`
-2. Flush state mode as `uint32`. It's an enumerator class with values `0`
-   (`NONE`), `1` (`IF_NEEDED`), `2` (`PERIODIC`), `3` (`ALWAYS`)
+2. Flush state mode as `uint32`. It's an enumerator class with values
+   `0` (`NONE`), `1` (`IF_NEEDED`), `2` (`PERIODIC`), `3` (`FORCE_FLUSH`), `4` (`FORCE_SYNC`)
 3. Cache size (number of coins) before the flush as `uint64`
 4. Cache memory usage in bytes as `uint64`
 5. If pruning caused the flush as `bool`
@@ -368,7 +368,7 @@ serialization of data structures is probably fine, a `sleep(10s)` not.
 TRACEPOINT_SEMAPHORE(example, gated_expensive_argument);
 …
 if (TRACEPOINT_ACTIVE(example, gated_expensive_argument)) {
-    expensive_argument = expensive_calulation();
+    expensive_argument = expensive_calculation();
     TRACEPOINT(example, gated_expensive_argument, expensive_argument);
 }
 ```
@@ -430,13 +430,13 @@ USDT support.
 To list probes in Bitcoin Core, use `info probes` in `gdb`:
 
 ```
-$ gdb ./build/src/bitcoind
+$ gdb ./build/bin/bitcoind
 …
 (gdb) info probes
 Type Provider   Name             Where              Semaphore Object
-stap net        inbound_message  0x000000000014419e 0x0000000000d29bd2 /build/src/bitcoind
-stap net        outbound_message 0x0000000000107c05 0x0000000000d29bd0 /build/src/bitcoind
-stap validation block_connected  0x00000000002fb10c 0x0000000000d29bd8 /build/src/bitcoind
+stap net        inbound_message  0x000000000014419e 0x0000000000d29bd2 /build/bin/bitcoind
+stap net        outbound_message 0x0000000000107c05 0x0000000000d29bd0 /build/bin/bitcoind
+stap validation block_connected  0x00000000002fb10c 0x0000000000d29bd8 /build/bin/bitcoind
 …
 ```
 
@@ -446,7 +446,7 @@ The `readelf` tool can be used to display the USDT tracepoints in Bitcoin Core.
 Look for the notes with the description `NT_STAPSDT`.
 
 ```
-$ readelf -n ./build/src/bitcoind | grep NT_STAPSDT -A 4 -B 2
+$ readelf -n ./build/bin/bitcoind | grep NT_STAPSDT -A 4 -B 2
 Displaying notes found in: .note.stapsdt
   Owner                 Data size	Description
   stapsdt              0x0000005d	NT_STAPSDT (SystemTap probe descriptors)
@@ -470,7 +470,7 @@ between distributions. For example, on
 [ubuntu binary]: https://github.com/iovisor/bcc/blob/master/INSTALL.md#ubuntu---binary
 
 ```
-$ tplist -l ./build/src/bitcoind -v
+$ tplist -l ./build/bin/bitcoind -v
 b'net':b'outbound_message' [sema 0xd29bd0]
   1 location(s)
   6 argument(s)

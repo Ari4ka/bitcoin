@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2021 The Bitcoin Core developers
+// Copyright (c) 2019-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -23,7 +23,6 @@
 #include <QString>
 
 class ClientModel;
-class OptionsModel;
 class PlatformStyle;
 class WalletModel;
 
@@ -78,7 +77,6 @@ private:
     ClientModel& m_client_model;
     interfaces::Node& m_node;
     const PlatformStyle* const m_platform_style;
-    OptionsModel* const m_options_model;
     mutable QMutex m_mutex;
     std::vector<WalletModel*> m_wallets;
     std::unique_ptr<interfaces::Handler> m_handler_load_wallet;
@@ -187,6 +185,7 @@ class MigrateWalletActivity : public WalletControllerActivity
 public:
     MigrateWalletActivity(WalletController* wallet_controller, QWidget* parent) : WalletControllerActivity(wallet_controller, parent) {}
 
+    void restore_and_migrate(const fs::path& path, const std::string& wallet_name);
     void migrate(const std::string& path);
 
 Q_SIGNALS:
@@ -195,6 +194,7 @@ Q_SIGNALS:
 private:
     QString m_success_message;
 
+    void do_migrate(const std::string& name, bool load_wallet);
     void finish();
 };
 

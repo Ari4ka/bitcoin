@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2022 The Bitcoin Core developers
+# Copyright (c) 2022-present The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or https://www.opensource.org/licenses/mit-license.php.
 """Test output type mixing during coin selection
@@ -106,18 +106,13 @@ def generate_payment_values(n, m):
 
 
 class AddressInputTypeGrouping(BitcoinTestFramework):
-    def add_options(self, parser):
-        self.add_wallet_options(parser, legacy=False)
-
     def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 2
-        # whitelist peers to speed up tx relay / mempool sync
-        self.noban_tx_relay = True
+        self.noban_tx_relay = True  # faster tx relay
         self.extra_args = [
             [
                 "-addresstype=bech32",
-                "-txindex",
             ],
             [
                 "-addresstype=p2sh-segwit",
@@ -127,7 +122,6 @@ class AddressInputTypeGrouping(BitcoinTestFramework):
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
-        self.skip_if_no_sqlite()
 
     def make_payment(self, A, B, v, addr_type):
         fee_rate = random.randint(1, 20)

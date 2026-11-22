@@ -1,8 +1,8 @@
-// Copyright (c) 2011-2022 The Bitcoin Core developers
+// Copyright (c) 2011-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <bitcoin-build-config.h> // IWYU pragma: keep
+#include <bitcoin-build-config.h>
 
 #include <qt/utilitydialog.h>
 
@@ -12,6 +12,7 @@
 
 #include <clientversion.h>
 #include <common/args.h>
+#include <common/license_info.h>
 #include <init.h>
 #include <util/strencodings.h>
 

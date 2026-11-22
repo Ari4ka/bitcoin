@@ -1,9 +1,11 @@
-// Copyright (c) 2010-2021 The Bitcoin Core developers
+// Copyright (c) 2010-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-//! @file node/types.h is a home for public enum and struct type definitions
-//! that are used internally by node code, but also used externally by wallet,
+//! @file
+//! @brief Home for public enum and struct type definitions.
+//!
+//! These are used internally by node code, but also used externally by wallet,
 //! mining or GUI code.
 //!
 //! This file is intended to define only simple types that do not have external
@@ -13,9 +15,7 @@
 #ifndef BITCOIN_NODE_TYPES_H
 #define BITCOIN_NODE_TYPES_H
 
-#include <cstddef>
-#include <policy/policy.h>
-#include <script/script.h>
+#include <cstdint>
 
 namespace node {
 enum class TransactionError {
@@ -25,42 +25,26 @@ enum class TransactionError {
     MEMPOOL_REJECTED,
     MEMPOOL_ERROR,
     MAX_FEE_EXCEEDED,
+    MAX_FEE_RATE_EXCEEDED,
     MAX_BURN_EXCEEDED,
     INVALID_PACKAGE,
+    PRIVATE_BROADCAST_FULL,
 };
 
-struct BlockCreateOptions {
-    /**
-     * Set false to omit mempool transactions
-     */
-    bool use_mempool{true};
-    /**
-     * The default reserved weight for the fixed-size block header,
-     * transaction count and coinbase transaction.
-     */
-    size_t block_reserved_weight{DEFAULT_BLOCK_RESERVED_WEIGHT};
-    /**
-     * The maximum additional sigops which the pool will add in coinbase
-     * transaction outputs.
-     */
-    size_t coinbase_output_max_additional_sigops{400};
-    /**
-     * Script to put in the coinbase transaction. The default is an
-     * anyone-can-spend dummy.
-     *
-     * Should only be used for tests, when the default doesn't suffice.
-     *
-     * Note that higher level code like the getblocktemplate RPC may omit the
-     * coinbase transaction entirely. It's instead constructed by pool software
-     * using fields like coinbasevalue, coinbaseaux and default_witness_commitment.
-     * This software typically also controls the payout outputs, even for solo
-     * mining.
-     *
-     * The size and sigops are not checked against
-     * coinbase_max_additional_weight and coinbase_output_max_additional_sigops.
-     */
-    CScript coinbase_output_script{CScript() << OP_TRUE};
+/**
+ * How to broadcast a local transaction.
+ * Used to influence `BroadcastTransaction()` and its callers.
+ */
+enum class TxBroadcast : uint8_t {
+    /// Add the transaction to the mempool and broadcast to all peers for which tx relay is enabled.
+    MEMPOOL_AND_BROADCAST_TO_ALL,
+    /// Add the transaction to the mempool, but don't broadcast to anybody.
+    MEMPOOL_NO_BROADCAST,
+    /// Omit the mempool and directly send the transaction via a few dedicated connections to
+    /// peers on privacy networks.
+    NO_MEMPOOL_PRIVATE_BROADCAST,
 };
+
 } // namespace node
 
 #endif // BITCOIN_NODE_TYPES_H

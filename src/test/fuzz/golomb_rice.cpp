@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2022 The Bitcoin Core developers
+// Copyright (c) 2020-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -10,10 +10,10 @@
 #include <test/fuzz/util.h>
 #include <test/util/random.h>
 #include <util/bytevectorhash.h>
+#include <util/check.h>
 #include <util/golombrice.h>
 
 #include <algorithm>
-#include <cassert>
 #include <cstdint>
 #include <iosfwd>
 #include <unordered_set>

@@ -1,12 +1,14 @@
-// Copyright (c) 2015-2022 The Bitcoin Core developers
+// Copyright (c) 2015-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <prevector.h>
+
 #include <serialize.h>
 #include <streams.h>
 #include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/fuzz.h>
+#include <util/check.h>
 
 #include <ranges>
 #include <vector>
@@ -207,8 +209,7 @@ FUZZ_TARGET(prevector)
     FuzzedDataProvider prov(buffer.data(), buffer.size());
     prevector_tester<8, int> test;
 
-    LIMITED_WHILE(prov.remaining_bytes(), 3000)
-    {
+    LIMITED_WHILE (prov.remaining_bytes(), 3000) {
         switch (prov.ConsumeIntegralInRange<int>(0, 13 + 3 * (test.size() > 0))) {
         case 0: {
             auto position = prov.ConsumeIntegralInRange<size_t>(0, test.size());

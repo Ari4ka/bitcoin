@@ -5,15 +5,25 @@
 #ifndef BITCOIN_TEST_FUZZ_UTIL_WALLET_H
 #define BITCOIN_TEST_FUZZ_UTIL_WALLET_H
 
+#include <outputtype.h>
+#include <policy/policy.h>
 #include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/fuzz.h>
 #include <test/fuzz/util.h>
-#include <policy/policy.h>
+#include <util/check.h>
 #include <wallet/coincontrol.h>
 #include <wallet/fees.h>
+#include <wallet/scriptpubkeyman.h>
 #include <wallet/spend.h>
 #include <wallet/test/util.h>
 #include <wallet/wallet.h>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace wallet {
 
@@ -21,20 +31,102 @@ namespace wallet {
  * Wraps a descriptor wallet for fuzzing.
  */
 struct FuzzedWallet {
+    static constexpr size_t DESTINATION_POOL_SIZE{16};
+    static constexpr uint64_t REBUILD_INTERVAL{1000};
+
     std::shared_ptr<CWallet> wallet;
+
     FuzzedWallet(interfaces::Chain& chain, const std::string& name, const std::string& seed_insecure)
+        : m_chain{chain}, m_name{name}, m_seed_insecure{seed_insecure}
     {
-        wallet = std::make_shared<CWallet>(&chain, name, CreateMockableWalletDatabase());
+        Build();
+    }
+
+    void Reset()
+    {
+        if (++m_iterations >= REBUILD_INTERVAL) {
+            Build();
+            return;
+        }
+        m_cursors.fill(0);
+        m_change_cursors.fill(0);
+        {
+            LOCK(wallet->cs_wallet);
+            wallet->ClearInMemoryTxStateForTest();
+            assert(wallet->mapWallet.empty());
+            assert(wallet->GetTXOs().empty());
+        }
+    }
+
+    CTxDestination GetDestination(FuzzedDataProvider& fuzzed_data_provider)
+    {
+        const auto type{fuzzed_data_provider.PickValueInArray(OUTPUT_TYPES)};
+        const bool external{fuzzed_data_provider.ConsumeBool()};
+        const size_t i{TypeIndex(type)};
+        auto& pool{external ? m_dests : m_change_dests};
+        auto& cursor{external ? m_cursors.at(i) : m_change_cursors.at(i)};
+        const CTxDestination& dest{pool.at(i).at(cursor % DESTINATION_POOL_SIZE)};
+        ++cursor;
+        return dest;
+    }
+
+    CScript GetScriptPubKey(FuzzedDataProvider& fuzzed_data_provider) { return GetScriptForDestination(GetDestination(fuzzed_data_provider)); }
+
+    int64_t RangeTotal() const
+    {
+        int64_t total{0};
+        for (const DescriptorScriptPubKeyMan* spkm : m_spkms) total += spkm->GetEndRange();
+        return total;
+    }
+
+private:
+    using DestinationPool = std::array<std::vector<CTxDestination>, OUTPUT_TYPES.size()>;
+
+    interfaces::Chain& m_chain;
+    const std::string m_name;
+    const std::string m_seed_insecure;
+
+    using PoolCursors = std::array<size_t, OUTPUT_TYPES.size()>;
+
+    DestinationPool m_dests;
+    DestinationPool m_change_dests;
+    PoolCursors m_cursors{};
+    PoolCursors m_change_cursors{};
+
+    static size_t TypeIndex(OutputType type)
+    {
+        for (size_t i = 0; i < OUTPUT_TYPES.size(); ++i) {
+            if (OUTPUT_TYPES.at(i) == type) return i;
+        }
+        AssertUnreachable();
+    }
+
+    std::vector<DescriptorScriptPubKeyMan*> m_spkms;
+    uint64_t m_iterations{0};
+
+    void Build()
+    {
+        m_spkms.clear();
+        for (auto& pool : m_dests) pool.clear();
+        for (auto& pool : m_change_dests) pool.clear();
+        m_cursors.fill(0);
+        m_change_cursors.fill(0);
+
+        wallet = std::make_shared<CWallet>(&m_chain, m_name, CreateMockableWalletDatabase());
         {
             LOCK(wallet->cs_wallet);
             wallet->SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
-            auto height{*Assert(chain.getHeight())};
-            wallet->SetLastBlockProcessed(height, chain.getBlockHash(height));
+            auto height{*Assert(m_chain.getHeight())};
+            wallet->SetLastBlockProcessed(height, m_chain.getBlockHash(height));
         }
         wallet->m_keypool_size = 1; // Avoid timeout in TopUp()
         assert(wallet->IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
-        ImportDescriptors(seed_insecure);
+        ImportDescriptors(m_seed_insecure);
+        PrecomputeDestinations();
+
+        m_iterations = 0;
     }
+
     void ImportDescriptors(const std::string& seed_insecure)
     {
         const std::vector<std::string> DESCS{
@@ -59,76 +151,24 @@ struct FuzzedWallet {
                 WalletDescriptor w_desc{std::move(parsed_desc), /*creation_time=*/0, /*range_start=*/0, /*range_end=*/1, /*next_index=*/0};
                 assert(!wallet->GetDescriptorScriptPubKeyMan(w_desc));
                 LOCK(wallet->cs_wallet);
-                auto spk_manager{wallet->AddWalletDescriptor(w_desc, keys, /*label=*/"", internal)};
-                assert(spk_manager);
-                wallet->AddActiveScriptPubKeyMan(spk_manager->GetID(), *Assert(w_desc.descriptor->GetOutputType()), internal);
+                auto& spk_manager = Assert(wallet->AddWalletDescriptor(w_desc, keys, /*label=*/"", internal))->get();
+                wallet->AddActiveScriptPubKeyMan(spk_manager.GetID(), *Assert(w_desc.descriptor->GetOutputType()), internal);
+                m_spkms.push_back(&spk_manager);
             }
         }
     }
-    CTxDestination GetDestination(FuzzedDataProvider& fuzzed_data_provider)
-    {
-        auto type{fuzzed_data_provider.PickValueInArray(OUTPUT_TYPES)};
-        if (fuzzed_data_provider.ConsumeBool()) {
-            return *Assert(wallet->GetNewDestination(type, ""));
-        } else {
-            return *Assert(wallet->GetNewChangeDestination(type));
-        }
-    }
-    CScript GetScriptPubKey(FuzzedDataProvider& fuzzed_data_provider) { return GetScriptForDestination(GetDestination(fuzzed_data_provider)); }
-    void FundTx(FuzzedDataProvider& fuzzed_data_provider, CMutableTransaction tx)
-    {
-        // The fee of "tx" is 0, so this is the total input and output amount
-        const CAmount total_amt{
-            std::accumulate(tx.vout.begin(), tx.vout.end(), CAmount{}, [](CAmount t, const CTxOut& out) { return t + out.nValue; })};
-        const uint32_t tx_size(GetVirtualTransactionSize(CTransaction{tx}));
-        std::set<int> subtract_fee_from_outputs;
-        if (fuzzed_data_provider.ConsumeBool()) {
-            for (size_t i{}; i < tx.vout.size(); ++i) {
-                if (fuzzed_data_provider.ConsumeBool()) {
-                    subtract_fee_from_outputs.insert(i);
-                }
-            }
-        }
-        std::vector<CRecipient> recipients;
-        for (size_t idx = 0; idx < tx.vout.size(); idx++) {
-            const CTxOut& tx_out = tx.vout[idx];
-            CTxDestination dest;
-            ExtractDestination(tx_out.scriptPubKey, dest);
-            CRecipient recipient = {dest, tx_out.nValue, subtract_fee_from_outputs.count(idx) == 1};
-            recipients.push_back(recipient);
-        }
-        CCoinControl coin_control;
-        coin_control.m_allow_other_inputs = fuzzed_data_provider.ConsumeBool();
-        CallOneOf(
-            fuzzed_data_provider, [&] { coin_control.destChange = GetDestination(fuzzed_data_provider); },
-            [&] { coin_control.m_change_type.emplace(fuzzed_data_provider.PickValueInArray(OUTPUT_TYPES)); },
-            [&] { /* no op (leave uninitialized) */ });
-        coin_control.fAllowWatchOnly = fuzzed_data_provider.ConsumeBool();
-        coin_control.m_include_unsafe_inputs = fuzzed_data_provider.ConsumeBool();
-        {
-            auto& r{coin_control.m_signal_bip125_rbf};
-            CallOneOf(
-                fuzzed_data_provider, [&] { r = true; }, [&] { r = false; }, [&] { r = std::nullopt; });
-        }
-        coin_control.m_feerate = CFeeRate{
-            // A fee of this range should cover all cases
-            fuzzed_data_provider.ConsumeIntegralInRange<CAmount>(0, 2 * total_amt),
-            tx_size,
-        };
-        if (fuzzed_data_provider.ConsumeBool()) {
-            *coin_control.m_feerate += GetMinimumFeeRate(*wallet, coin_control, nullptr);
-        }
-        coin_control.fOverrideFeeRate = fuzzed_data_provider.ConsumeBool();
-        // Add solving data (m_external_provider and SelectExternal)?
 
-        int change_position{fuzzed_data_provider.ConsumeIntegralInRange<int>(-1, tx.vout.size() - 1)};
-        bilingual_str error;
-        // Clear tx.vout since it is not meant to be used now that we are passing outputs directly.
-        // This sets us up for a future PR to completely remove tx from the function signature in favor of passing inputs directly
-        tx.vout.clear();
-        (void)FundTransaction(*wallet, tx, recipients, change_position, /*lockUnspents=*/false, coin_control);
+    void PrecomputeDestinations()
+    {
+        for (size_t i = 0; i < OUTPUT_TYPES.size(); ++i) {
+            const OutputType type{OUTPUT_TYPES.at(i)};
+            for (size_t j = 0; j < DESTINATION_POOL_SIZE; ++j) {
+                m_dests.at(i).push_back(*Assert(wallet->GetNewDestination(type, "")));
+                m_change_dests.at(i).push_back(*Assert(wallet->GetNewChangeDestination(type)));
+            }
+        }
     }
 };
-}
+} // namespace wallet
 
 #endif // BITCOIN_TEST_FUZZ_UTIL_WALLET_H

@@ -1,17 +1,17 @@
 // Copyright (c) 2012 Pieter Wuille
-// Copyright (c) 2012-2022 The Bitcoin Core developers
+// Copyright (c) 2012-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <bitcoin-build-config.h> // IWYU pragma: keep
+#include <bitcoin-build-config.h>
 
 #include <addrman.h>
 #include <addrman_impl.h>
 
 #include <hash.h>
-#include <logging.h>
 #include <logging/timer.h>
 #include <netaddress.h>
+#include <netgroup.h>
 #include <protocol.h>
 #include <random.h>
 #include <serialize.h>
@@ -19,31 +19,12 @@
 #include <tinyformat.h>
 #include <uint256.h>
 #include <util/check.h>
+#include <util/log.h>
 #include <util/time.h>
 
 #include <cmath>
 #include <optional>
 
-/** Over how many buckets entries with tried addresses from a single group (/16 for IPv4) are spread */
-static constexpr uint32_t ADDRMAN_TRIED_BUCKETS_PER_GROUP{8};
-/** Over how many buckets entries with new addresses originating from a single group are spread */
-static constexpr uint32_t ADDRMAN_NEW_BUCKETS_PER_SOURCE_GROUP{64};
-/** Maximum number of times an address can occur in the new table */
-static constexpr int32_t ADDRMAN_NEW_BUCKETS_PER_ADDRESS{8};
-/** How old addresses can maximally be */
-static constexpr auto ADDRMAN_HORIZON{30 * 24h};
-/** After how many failed attempts we give up on a new node */
-static constexpr int32_t ADDRMAN_RETRIES{3};
-/** How many successive failures are allowed ... */
-static constexpr int32_t ADDRMAN_MAX_FAILURES{10};
-/** ... in at least this duration */
-static constexpr auto ADDRMAN_MIN_FAIL{7 * 24h};
-/** How recent a successful connection should be before we allow an address to be evicted from tried */
-static constexpr auto ADDRMAN_REPLACEMENT{4h};
-/** The maximum number of tried addr collisions to store */
-static constexpr size_t ADDRMAN_SET_TRIED_COLLISION_SIZE{10};
-/** The maximum time we'll spend trying to resolve a tried table collision */
-static constexpr auto ADDRMAN_TEST_WINDOW{40min};
 
 int AddrInfo::GetTriedBucket(const uint256& nKey, const NetGroupManager& netgroupman) const
 {
@@ -156,7 +137,7 @@ void AddrManImpl::Serialize(Stream& s_) const
      * * for each new bucket:
      *   * number of elements
      *   * for each element: index in the serialized "all new addresses"
-     * * asmap checksum
+     * * asmap version
      *
      * 2**30 is xorred with the number of buckets to make addrman deserializer v0 detect it
      * as incompatible. This is necessary because it did not check the version number on
@@ -222,9 +203,9 @@ void AddrManImpl::Serialize(Stream& s_) const
             }
         }
     }
-    // Store asmap checksum after bucket entries so that it
+    // Store asmap version after bucket entries so that it
     // can be ignored by older clients for backward compatibility.
-    s << m_netgroupman.GetAsmapChecksum();
+    s << m_netgroupman.GetAsmapVersion();
 }
 
 template <typename Stream>
@@ -330,16 +311,16 @@ void AddrManImpl::Unserialize(Stream& s_)
         }
     }
 
-    // If the bucket count and asmap checksum haven't changed, then attempt
+    // If the bucket count and asmap version haven't changed, then attempt
     // to restore the entries to the buckets/positions they were in before
     // serialization.
-    uint256 supplied_asmap_checksum{m_netgroupman.GetAsmapChecksum()};
-    uint256 serialized_asmap_checksum;
+    uint256 supplied_asmap_version{m_netgroupman.GetAsmapVersion()};
+    uint256 serialized_asmap_version;
     if (format >= Format::V2_ASMAP) {
-        s >> serialized_asmap_checksum;
+        s >> serialized_asmap_version;
     }
     const bool restore_bucketing{nUBuckets == ADDRMAN_NEW_BUCKET_COUNT &&
-        serialized_asmap_checksum == supplied_asmap_checksum};
+        serialized_asmap_version == supplied_asmap_version};
 
     if (!restore_bucketing) {
         LogDebug(BCLog::ADDRMAN, "Bucketing method was updated, re-bucketing addrman entries from disk\n");
@@ -457,7 +438,7 @@ void AddrManImpl::Delete(nid_type nId)
 {
     AssertLockHeld(cs);
 
-    assert(mapInfo.count(nId) != 0);
+    assert(mapInfo.contains(nId));
     AddrInfo& info = mapInfo[nId];
     assert(!info.fInTried);
     assert(info.nRefCount == 0);
@@ -516,7 +497,7 @@ void AddrManImpl::MakeTried(AddrInfo& info, nid_type nId)
     if (vvTried[nKBucket][nKBucketPos] != -1) {
         // find an item to evict
         nid_type nIdEvict = vvTried[nKBucket][nKBucketPos];
-        assert(mapInfo.count(nIdEvict) == 1);
+        assert(mapInfo.contains(nIdEvict));
         AddrInfo& infoOld = mapInfo[nIdEvict];
 
         // Remove the to-be-evicted item from the tried set.
@@ -663,8 +644,8 @@ bool AddrManImpl::Good_(const CService& addr, bool test_before_evict, NodeSecond
         }
         // Output the entry we'd be colliding with, for debugging purposes
         auto colliding_entry = mapInfo.find(vvTried[tried_bucket][tried_bucket_pos]);
-        LogDebug(BCLog::ADDRMAN, "Collision with %s while attempting to move %s to tried table. Collisions=%d\n",
-                 colliding_entry != mapInfo.end() ? colliding_entry->second.ToStringAddrPort() : "",
+        LogDebug(BCLog::ADDRMAN, "Collision with %s while attempting to move %s to tried table. Collisions=%d",
+                 colliding_entry != mapInfo.end() ? colliding_entry->second.ToStringAddrPort() : "<unknown-addr>",
                  addr.ToStringAddrPort(),
                  m_tried_collisions.size());
         return false;
@@ -752,29 +733,36 @@ std::pair<CAddress, NodeSeconds> AddrManImpl::Select_(bool new_only, const std::
     // Loop through the addrman table until we find an appropriate entry
     double chance_factor = 1.0;
     while (1) {
-        // Pick a bucket, and an initial position in that bucket.
+        // Pick a bucket.
         int bucket = insecure_rand.randrange(bucket_count);
-        int initial_position = insecure_rand.randrange(ADDRMAN_BUCKET_SIZE);
 
-        // Iterate over the positions of that bucket, starting at the initial one,
-        // and looping around.
-        int i, position;
-        nid_type node_id;
-        for (i = 0; i < ADDRMAN_BUCKET_SIZE; ++i) {
-            position = (initial_position + i) % ADDRMAN_BUCKET_SIZE;
-            node_id = GetEntry(search_tried, bucket, position);
-            if (node_id != -1) {
-                if (!networks.empty()) {
-                    const auto it{mapInfo.find(node_id)};
-                    if (Assume(it != mapInfo.end()) && networks.contains(it->second.GetNetwork())) break;
-                } else {
-                    break;
-                }
-            }
+        // Copy the bucket's non-empty entries over to a temporary buffer, so we can pick a random one.
+        // This loop copies without applying network filtering; we do that lazily below in the
+        // sampling loop instead.
+        nid_type copied_bucket[ADDRMAN_BUCKET_SIZE];
+        int copied_count = 0;
+        for (int i = 0; i < ADDRMAN_BUCKET_SIZE; ++i) {
+            auto node_id = GetEntry(search_tried, bucket, i);
+            if (node_id != -1) copied_bucket[copied_count++] = node_id;
         }
-
-        // If the bucket is entirely empty, start over with a (likely) different one.
-        if (i == ADDRMAN_BUCKET_SIZE) continue;
+        // Then try to find a random non-filtered one among them.
+        nid_type node_id = -1;
+        while (copied_count > 0) {
+            // Pick a random entry.
+            auto pos = insecure_rand.randrange(copied_count);
+            node_id = copied_bucket[pos];
+            // No filtering is to be applied; we are good.
+            if (networks.empty()) break;
+            // Check the filter otherwise.
+            const auto it{mapInfo.find(node_id)};
+            if (Assume(it != mapInfo.end()) && networks.contains(it->second.GetNetwork())) break;
+            // If this entry was for the wrong network, remove it from the buffer and retry.
+            copied_bucket[pos] = copied_bucket[--copied_count];
+        }
+        // If the bucket is empty or only contains filtered entries, start over with a (likely)
+        // different one.
+        if (copied_count == 0) continue;
+        Assume(node_id != -1);
 
         // Find the entry to return.
         const auto it_found{mapInfo.find(node_id)};
@@ -919,7 +907,7 @@ void AddrManImpl::ResolveCollisions_()
         bool erase_collision = false;
 
         // If id_new not found in mapInfo remove it from m_tried_collisions
-        if (mapInfo.count(id_new) != 1) {
+        if (!mapInfo.contains(id_new)) {
             erase_collision = true;
         } else {
             AddrInfo& info_new = mapInfo[id_new];
@@ -929,7 +917,10 @@ void AddrManImpl::ResolveCollisions_()
             int tried_bucket_pos = info_new.GetBucketPosition(nKey, false, tried_bucket);
             if (!info_new.IsValid()) { // id_new may no longer map to a valid address
                 erase_collision = true;
-            } else if (vvTried[tried_bucket][tried_bucket_pos] != -1) { // The position in the tried bucket is not empty
+            } else {
+                // A pending tried collision implies that the destination tried slot
+                // remains occupied until we resolve it.
+                Assume(vvTried[tried_bucket][tried_bucket_pos] != -1);
 
                 // Get the to-be-evicted address that is being tested
                 nid_type id_old = vvTried[tried_bucket][tried_bucket_pos];
@@ -958,9 +949,6 @@ void AddrManImpl::ResolveCollisions_()
                     Good_(info_new, false, current_time);
                     erase_collision = true;
                 }
-            } else { // Collision is not actually a collision anymore
-                Good_(info_new, false, Now<NodeSeconds>());
-                erase_collision = true;
             }
         }
 
@@ -985,7 +973,7 @@ std::pair<CAddress, NodeSeconds> AddrManImpl::SelectTriedCollision_()
     nid_type id_new = *it;
 
     // If id_new not found in mapInfo remove it from m_tried_collisions
-    if (mapInfo.count(id_new) != 1) {
+    if (!mapInfo.contains(id_new)) {
         m_tried_collisions.erase(it);
         return {};
     }
@@ -996,6 +984,7 @@ std::pair<CAddress, NodeSeconds> AddrManImpl::SelectTriedCollision_()
     int tried_bucket = newInfo.GetTriedBucket(nKey, m_netgroupman);
     int tried_bucket_pos = newInfo.GetBucketPosition(nKey, false, tried_bucket);
 
+    Assume(vvTried[tried_bucket][tried_bucket_pos] != -1);
     const AddrInfo& info_old = mapInfo[vvTried[tried_bucket][tried_bucket_pos]];
     return {info_old, info_old.m_last_try};
 }
@@ -1055,8 +1044,8 @@ void AddrManImpl::Check() const
 
     const int err{CheckAddrman()};
     if (err) {
-        LogPrintf("ADDRMAN CONSISTENCY CHECK FAILED!!! err=%i\n", err);
-        assert(false);
+        LogError("ADDRMAN CONSISTENCY CHECK FAILED!!! err=%i", err);
+        AssertUnreachable();
     }
 }
 
@@ -1115,7 +1104,7 @@ int AddrManImpl::CheckAddrman() const
     for (int n = 0; n < ADDRMAN_TRIED_BUCKET_COUNT; n++) {
         for (int i = 0; i < ADDRMAN_BUCKET_SIZE; i++) {
             if (vvTried[n][i] != -1) {
-                if (!setTried.count(vvTried[n][i]))
+                if (!setTried.contains(vvTried[n][i]))
                     return -11;
                 const auto it{mapInfo.find(vvTried[n][i])};
                 if (it == mapInfo.end() || it->second.GetTriedBucket(nKey, m_netgroupman) != n) {
@@ -1132,7 +1121,7 @@ int AddrManImpl::CheckAddrman() const
     for (int n = 0; n < ADDRMAN_NEW_BUCKET_COUNT; n++) {
         for (int i = 0; i < ADDRMAN_BUCKET_SIZE; i++) {
             if (vvNew[n][i] != -1) {
-                if (!mapNew.count(vvNew[n][i]))
+                if (!mapNew.contains(vvNew[n][i]))
                     return -12;
                 const auto it{mapInfo.find(vvNew[n][i])};
                 if (it == mapInfo.end() || it->second.GetBucketPosition(nKey, true, n) != i) {
@@ -1289,7 +1278,6 @@ void AddrMan::Unserialize(Stream& s_)
 // explicit instantiation
 template void AddrMan::Serialize(HashedSourceWriter<AutoFile>&) const;
 template void AddrMan::Serialize(DataStream&) const;
-template void AddrMan::Unserialize(AutoFile&);
 template void AddrMan::Unserialize(HashVerifier<AutoFile>&);
 template void AddrMan::Unserialize(DataStream&);
 template void AddrMan::Unserialize(HashVerifier<DataStream>&);

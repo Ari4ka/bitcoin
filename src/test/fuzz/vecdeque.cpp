@@ -2,13 +2,15 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <util/vecdeque.h>
+
 #include <random.h>
 #include <span.h>
 #include <test/fuzz/util.h>
-#include <util/vecdeque.h>
+#include <util/check.h>
 
+#include <cstdint>
 #include <deque>
-#include <stdint.h>
 
 namespace {
 
@@ -24,7 +26,7 @@ static constexpr size_t MAX_OPERATIONS{1024};
  * T must be constructible from a uint64_t seed, comparable to other T, copyable, and movable.
  */
 template<typename T, bool CheckNoneLeft>
-void TestType(Span<const uint8_t> buffer, uint64_t rng_tweak)
+void TestType(std::span<const uint8_t> buffer, uint64_t rng_tweak)
 {
     FuzzedDataProvider provider(buffer.data(), buffer.size());
     // Local RNG, only used for the seeds to initialize T objects with.
@@ -52,7 +54,7 @@ void TestType(Span<const uint8_t> buffer, uint64_t rng_tweak)
         }
     };
 
-    LIMITED_WHILE(provider.remaining_bytes(), MAX_OPERATIONS) {
+    LIMITED_WHILE (provider.remaining_bytes(), MAX_OPERATIONS) {
         int command = provider.ConsumeIntegral<uint8_t>() % 64;
         unsigned idx = real.empty() ? 0 : provider.ConsumeIntegralInRange<unsigned>(0, real.size() - 1);
         const size_t num_buffers = sim.size();
@@ -456,12 +458,7 @@ public:
 
     friend std::strong_ordering operator<=>(const TrackedObj& a, const TrackedObj& b)
     {
-        // Libc++ 15 & 16 do not support std::optional<T>::operator<=> yet. See
-        // https://reviews.llvm.org/D146392.
-        if (!a.Deref().has_value() || !b.Deref().has_value()) {
-            return a.Deref().has_value() <=> b.Deref().has_value();
-        }
-        return *a.Deref() <=> *b.Deref();
+        return a.Deref() <=> b.Deref();
     }
 
     static void CheckNoneExist()

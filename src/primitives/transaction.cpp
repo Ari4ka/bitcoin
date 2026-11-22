@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2022 The Bitcoin Core developers
+// Copyright (c) 2009-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -8,14 +8,14 @@
 #include <consensus/amount.h>
 #include <crypto/hex_base.h>
 #include <hash.h>
+#include <primitives/transaction_identifier.h>
 #include <script/script.h>
 #include <serialize.h>
 #include <tinyformat.h>
-#include <uint256.h>
-#include <util/transaction_identifier.h>
 
 #include <algorithm>
 #include <cassert>
+#include <span>
 #include <stdexcept>
 
 std::string COutPoint::ToString() const
@@ -48,7 +48,7 @@ std::string CTxIn::ToString() const
         str += strprintf(", scriptSig=%s", HexStr(scriptSig).substr(0, 24));
     if (nSequence != SEQUENCE_FINAL)
         str += strprintf(", nSequence=%u", nSequence);
-    str += ")";
+    str += ')';
     return str;
 }
 
@@ -107,7 +107,7 @@ CAmount CTransaction::GetValueOut() const
     return nValueOut;
 }
 
-unsigned int CTransaction::GetTotalSize() const
+unsigned int CTransaction::ComputeTotalSize() const
 {
     return ::GetSerializeSize(TX_WITH_WITNESS(*this));
 }

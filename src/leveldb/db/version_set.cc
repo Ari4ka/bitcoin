@@ -39,7 +39,7 @@ static int64_t ExpandedCompactionByteSizeLimit(const Options* options) {
   return 25 * TargetFileSize(options);
 }
 
-static double MaxBytesForLevel(const Options* options, int level) {
+static double MaxBytesForLevel(const Options*, int level) {
   // Note: the result for level zero is not really used since we set
   // the level-0 compaction threshold based on number of files.
 
@@ -52,7 +52,7 @@ static double MaxBytesForLevel(const Options* options, int level) {
   return result;
 }
 
-static uint64_t MaxFileSizeForLevel(const Options* options, int level) {
+static uint64_t MaxFileSizeForLevel(const Options* options, int) {
   // We could vary per level to reduce number of files?
   return TargetFileSize(options);
 }
@@ -400,16 +400,11 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
   return state.found ? state.s : Status::NotFound(Slice());
 }
 
-bool Version::UpdateStats(const GetStats& stats) {
-  FileMetaData* f = stats.seek_file;
-  if (f != nullptr) {
-    f->allowed_seeks--;
-    if (f->allowed_seeks <= 0 && file_to_compact_ == nullptr) {
-      file_to_compact_ = f;
-      file_to_compact_level_ = stats.seek_file_level;
-      return true;
-    }
-  }
+bool Version::UpdateStats(const GetStats& /*stats*/) {
+  // Disable automatic compactions triggered by read seek counters.
+  // The heuristic was tuned for expensive random seeks and can create
+  // severe write amplification on large random-key databases.
+  // Size and manual compactions still run.
   return false;
 }
 
@@ -661,6 +656,8 @@ class VersionSet::Builder {
       // same as the compaction of 40KB of data.  We are a little
       // conservative and allow approximately one seek for every 16KB
       // of data before triggering a compaction.
+      //
+      // Note: seek compactions are disabled. See Version::UpdateStats.
       f->allowed_seeks = static_cast<int>((f->file_size / 16384U));
       if (f->allowed_seeks < 100) f->allowed_seeks = 100;
 
@@ -863,7 +860,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
 Status VersionSet::Recover(bool* save_manifest) {
   struct LogReporter : public log::Reader::Reporter {
     Status* status;
-    void Corruption(size_t bytes, const Status& s) override {
+    void Corruption(size_t, const Status& s) override {
       if (this->status->ok()) *this->status = s;
     }
   };
@@ -994,7 +991,7 @@ bool VersionSet::ReuseManifest(const std::string& dscname,
   }
   FileType manifest_type;
   uint64_t manifest_number;
-  uint64_t manifest_size;
+  uint64_t manifest_size = 0;
   if (!ParseFileName(dscbase, &manifest_number, &manifest_type) ||
       manifest_type != kDescriptorFile ||
       !env_->GetFileSize(dscname, &manifest_size).ok() ||

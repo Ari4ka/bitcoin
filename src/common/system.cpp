@@ -3,35 +3,35 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <bitcoin-build-config.h> // IWYU pragma: keep
+#include <bitcoin-build-config.h>
 
 #include <common/system.h>
 
-#include <logging.h>
+#include <util/log.h>
 #include <util/string.h>
 #include <util/time.h>
 
-#ifndef WIN32
-#include <sys/stat.h>
-#else
+#ifdef WIN32
 #include <compat/compat.h>
-#include <codecvt>
+#include <util/check.h>
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 #endif
 
 #ifdef HAVE_MALLOPT_ARENA_MAX
 #include <malloc.h>
 #endif
 
+#include <cstdint>
 #include <cstdlib>
-#include <locale>
-#include <stdexcept>
+#include <optional>
 #include <string>
 #include <thread>
 
 using util::ReplaceAll;
-
-// Application startup time (used for uptime calculation)
-const int64_t nStartupTime = GetTime();
 
 #ifndef WIN32
 std::string ShellEscape(const std::string& arg)
@@ -46,13 +46,10 @@ std::string ShellEscape(const std::string& arg)
 void runCommand(const std::string& strCommand)
 {
     if (strCommand.empty()) return;
-#ifndef WIN32
     int nErr = ::system(strCommand.c_str());
-#else
-    int nErr = ::_wsystem(std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>,wchar_t>().from_bytes(strCommand).c_str());
-#endif
-    if (nErr)
-        LogPrintf("runCommand error: system(%s) returned %d\n", strCommand, nErr);
+    if (nErr) {
+        LogWarning("runCommand error: system(%s) returned %d", strCommand, nErr);
+    }
 }
 #endif
 
@@ -68,15 +65,9 @@ void SetupEnvironment()
         mallopt(M_ARENA_MAX, 1);
     }
 #endif
-    // On most POSIX systems (e.g. Linux, but not BSD) the environment's locale
-    // may be invalid, in which case the "C.UTF-8" locale is used as fallback.
-#if !defined(WIN32) && !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__OpenBSD__) && !defined(__NetBSD__)
-    try {
-        std::locale(""); // Raises a runtime error if current locale is invalid
-    } catch (const std::runtime_error&) {
-        setenv("LC_ALL", "C.UTF-8", 1);
-    }
-#elif defined(WIN32)
+
+#if defined(WIN32)
+    assert(GetACP() == CP_UTF8);
     // Set the default input/output charset is utf-8
     SetConsoleCP(CP_UTF8);
     SetConsoleOutputCP(CP_UTF8);
@@ -105,8 +96,21 @@ int GetNumCores()
     return std::thread::hardware_concurrency();
 }
 
-// Obtain the application startup time (used for uptime calculation)
-int64_t GetStartupTime()
+std::optional<uint64_t> TryGetTotalRam()
 {
-    return nStartupTime;
+    static const auto total_ram{[]() -> std::optional<uint64_t> {
+#ifdef WIN32
+        if (MEMORYSTATUSEX m{}; (m.dwLength = sizeof(m), GlobalMemoryStatusEx(&m))) return m.ullTotalPhys;
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__illumos__) || defined(__linux__)
+        if (long p{sysconf(_SC_PHYS_PAGES)}, s{sysconf(_SC_PAGESIZE)}; p > 0 && s > 0) return 1ULL * p * s;
+#endif
+        return std::nullopt;
+    }()};
+    return total_ram;
 }
+
+namespace {
+    const auto g_startup_time{SteadyClock::now()};
+} // namespace
+
+SteadyClock::duration GetUptime() { return SteadyClock::now() - g_startup_time; }

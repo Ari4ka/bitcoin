@@ -2,10 +2,12 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <util/bitset.h>
+
 #include <random.h>
 #include <span.h>
 #include <test/fuzz/util.h>
-#include <util/bitset.h>
+#include <util/check.h>
 
 #include <bitset>
 #include <vector>
@@ -68,7 +70,7 @@ void TestType(FuzzBufferType buffer)
         assert(sim[idx].count() == real[idx].Count());
     };
 
-    LIMITED_WHILE(buffer.size() > 0, 1000) {
+    LIMITED_WHILE (buffer.size() > 0, 1000) {
         // Read one byte to determine which operation to execute on the BitSets.
         int command = ReadByte(buffer) % 64;
         // Read another byte that determines which bitsets will be involved.

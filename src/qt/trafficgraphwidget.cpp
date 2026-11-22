@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2022 The Bitcoin Core developers
+// Copyright (c) 2011-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -36,8 +36,6 @@ void TrafficGraphWidget::setClientModel(ClientModel *model)
         nLastBytesOut = model->node().getTotalBytesSent();
     }
 }
-
-std::chrono::minutes TrafficGraphWidget::getGraphRange() const { return m_range; }
 
 void TrafficGraphWidget::paintPath(QPainterPath &path, QQueue<float> &samples)
 {

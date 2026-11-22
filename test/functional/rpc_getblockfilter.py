@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2018-2021 The Bitcoin Core developers
+# Copyright (c) 2018-present The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test the getblockfilter RPC."""
@@ -49,6 +49,16 @@ class GetBlockFilterTest(BitcoinTestFramework):
         # Test getblockfilter with unknown block
         bad_block_hash = "0123456789abcdef" * 4
         assert_raises_rpc_error(-5, "Block not found", self.nodes[0].getblockfilter, bad_block_hash, "basic")
+
+        # Test getblockfilter for a known header before connecting its block
+        block = self.generateblock(self.nodes[1], output="raw(55)", transactions=[], submit=False)
+        self.nodes[0].submitheader(block["hex"][:160])
+
+        # The header is known, but the block has never been connected
+        assert_raises_rpc_error(
+            -5, "Filter not found. Block was not connected to active chain.",
+            self.nodes[0].getblockfilter, block["hash"], "basic",
+        )
 
         # Test getblockfilter with undefined filter type
         genesis_hash = self.nodes[0].getblockhash(0)

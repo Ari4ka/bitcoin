@@ -1,10 +1,11 @@
-// Copyright (c) 2020-2022 The Bitcoin Core developers
+// Copyright (c) 2020-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_TEST_UTIL_NET_H
 #define BITCOIN_TEST_UTIL_NET_H
 
+#include <attributes.h>
 #include <compat/compat.h>
 #include <netmessagemaker.h>
 #include <net.h>
@@ -21,7 +22,6 @@
 #include <array>
 #include <cassert>
 #include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -40,10 +40,17 @@ struct ConnmanTestMsg : public CConnman {
         m_msgproc = msgproc;
     }
 
+    void SetAddrman(AddrMan& in) { addrman = in; }
+
     void SetPeerConnectTimeout(std::chrono::seconds timeout)
     {
         m_peer_connect_timeout = timeout;
     }
+
+    void ResetAddrCache();
+    void ResetMaxOutboundCycle();
+    /// Reset the internal state.
+    void Reset();
 
     std::vector<CNode*> TestNodes()
     {
@@ -68,6 +75,24 @@ struct ConnmanTestMsg : public CConnman {
         m_nodes.clear();
     }
 
+    void CreateNodeFromAcceptedSocketPublic(std::unique_ptr<Sock> sock,
+                                            NetPermissionFlags permissions,
+                                            const CAddress& addr_bind,
+                                            const CAddress& addr_peer)
+    {
+        CreateNodeFromAcceptedSocket(std::move(sock), permissions, addr_bind, addr_peer);
+    }
+
+    bool InitBindsPublic(const CConnman::Options& options)
+    {
+        return InitBinds(options);
+    }
+
+    void SocketHandlerPublic()
+    {
+        SocketHandler();
+    }
+
     void Handshake(CNode& node,
                    bool successfully_connected,
                    ServiceFlags remote_services,
@@ -78,21 +103,21 @@ struct ConnmanTestMsg : public CConnman {
 
     bool ProcessMessagesOnce(CNode& node) EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex)
     {
-        return m_msgproc->ProcessMessages(&node, flagInterruptMsgProc);
+        return m_msgproc->ProcessMessages(node, flagInterruptMsgProc);
     }
 
-    void NodeReceiveMsgBytes(CNode& node, Span<const uint8_t> msg_bytes, bool& complete) const;
+    void NodeReceiveMsgBytes(CNode& node, std::span<const uint8_t> msg_bytes, bool& complete) const;
 
     bool ReceiveMsgFrom(CNode& node, CSerializedNetMsg&& ser_msg) const;
     void FlushSendBuffer(CNode& node) const;
 
-    bool AlreadyConnectedPublic(const CAddress& addr) { return AlreadyConnectedToAddress(addr); };
+    bool AlreadyConnectedToAddressPublic(const CNetAddr& addr) { return AlreadyConnectedToAddress(addr); };
 
     CNode* ConnectNodePublic(PeerManager& peerman, const char* pszDest, ConnectionType conn_type)
         EXCLUSIVE_LOCKS_REQUIRED(!m_unused_i2p_sessions_mutex);
 };
 
-constexpr ServiceFlags ALL_SERVICE_FLAGS[]{
+inline constexpr ServiceFlags ALL_SERVICE_FLAGS[]{
     NODE_NONE,
     NODE_NETWORK,
     NODE_BLOOM,
@@ -102,7 +127,7 @@ constexpr ServiceFlags ALL_SERVICE_FLAGS[]{
     NODE_P2P_V2,
 };
 
-constexpr NetPermissionFlags ALL_NET_PERMISSION_FLAGS[]{
+inline constexpr NetPermissionFlags ALL_NET_PERMISSION_FLAGS[]{
     NetPermissionFlags::None,
     NetPermissionFlags::BloomFilter,
     NetPermissionFlags::Relay,
@@ -115,16 +140,17 @@ constexpr NetPermissionFlags ALL_NET_PERMISSION_FLAGS[]{
     NetPermissionFlags::All,
 };
 
-constexpr ConnectionType ALL_CONNECTION_TYPES[]{
+inline constexpr ConnectionType ALL_CONNECTION_TYPES[]{
     ConnectionType::INBOUND,
     ConnectionType::OUTBOUND_FULL_RELAY,
     ConnectionType::MANUAL,
     ConnectionType::FEELER,
     ConnectionType::BLOCK_RELAY,
     ConnectionType::ADDR_FETCH,
+    ConnectionType::PRIVATE_BROADCAST,
 };
 
-constexpr auto ALL_NETWORKS = std::array{
+inline constexpr auto ALL_NETWORKS = std::array{
     Network::NET_UNROUTABLE,
     Network::NET_IPV4,
     Network::NET_IPV6,
@@ -213,7 +239,7 @@ class DynSock : public ZeroSock
 {
 public:
     /**
-     * Unidirectional bytes or CNetMessage queue (FIFO).
+     * Unidirectional bytes queue (FIFO).
      */
     class Pipe
     {
@@ -229,37 +255,17 @@ public:
         ssize_t GetBytes(void* buf, size_t len, int flags = 0) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
         /**
-         * Deserialize a `CNetMessage` and remove it from the pipe.
-         * If not enough bytes are available then the function will wait. If parsing fails
-         * or EOF is signaled to the pipe, then `std::nullopt` is returned.
-         */
-        std::optional<CNetMessage> GetNetMsg() EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
-
-        /**
          * Push bytes to the pipe.
          */
         void PushBytes(const void* buf, size_t len) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
         /**
-         * Construct and push CNetMessage to the pipe.
-         */
-        template <typename... Args>
-        void PushNetMsg(const std::string& type, Args&&... payload) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
-
-        /**
-         * Signal end-of-file on the receiving end (`GetBytes()` or `GetNetMsg()`).
+         * Signal end-of-file on the receiving end (`GetBytes()`).
          */
         void Eof() EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
     private:
-        /**
-         * Return when there is some data to read or EOF has been signaled.
-         * @param[in,out] lock Unique lock that must have been derived from `m_mutex` by `WAIT_LOCK(m_mutex, lock)`.
-         */
-        void WaitForDataOrEof(UniqueLock<Mutex>& lock) EXCLUSIVE_LOCKS_REQUIRED(m_mutex);
-
         Mutex m_mutex;
-        std::condition_variable m_cond;
         std::vector<uint8_t> m_data GUARDED_BY(m_mutex);
         bool m_eof GUARDED_BY(m_mutex){false};
     };
@@ -310,7 +316,15 @@ public:
      * @param[in] pipes Send/recv pipes used by the Send() and Recv() methods.
      * @param[in] accept_sockets Sockets to return by the Accept() method.
      */
-    explicit DynSock(std::shared_ptr<Pipes> pipes, std::shared_ptr<Queue> accept_sockets);
+    explicit DynSock(std::shared_ptr<Pipes> pipes, Queue* accept_sockets LIFETIMEBOUND);
+
+    /**
+     * Create a new mocked sock that represents a connected socket. It has pipes
+     * for data transport but there is no queue because connected sockets do
+     * not introduce new connected sockets.
+     * @param[in] pipes Send/recv pipes used by the Send() and Recv() methods.
+     */
+    explicit DynSock(std::shared_ptr<Pipes> pipes);
 
     ~DynSock();
 
@@ -330,31 +344,8 @@ private:
     DynSock& operator=(Sock&&) override;
 
     std::shared_ptr<Pipes> m_pipes;
-    std::shared_ptr<Queue> m_accept_sockets;
+    Queue* const m_accept_sockets;
 };
-
-template <typename... Args>
-void DynSock::Pipe::PushNetMsg(const std::string& type, Args&&... payload)
-{
-    auto msg = NetMsg::Make(type, std::forward<Args>(payload)...);
-    V1Transport transport{NodeId{0}};
-
-    const bool queued{transport.SetMessageToSend(msg)};
-    assert(queued);
-
-    LOCK(m_mutex);
-
-    for (;;) {
-        const auto& [bytes, _more, _msg_type] = transport.GetBytesToSend(/*have_next_message=*/true);
-        if (bytes.empty()) {
-            break;
-        }
-        m_data.insert(m_data.end(), bytes.begin(), bytes.end());
-        transport.MarkBytesSent(bytes.size());
-    }
-
-    m_cond.notify_all();
-}
 
 std::vector<NodeEvictionCandidate> GetRandomNodeEvictionCandidates(int n_candidates, FastRandomContext& random_context);
 

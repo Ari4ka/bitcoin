@@ -1,4 +1,4 @@
-// Copyright (c) 2023 The Bitcoin Core developers
+// Copyright (c) 2023-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://www.opensource.org/licenses/mit-license.php.
 
@@ -10,15 +10,14 @@
 #include <script/script.h>
 #include <script/solver.h>
 #include <uint256.h>
+#include <util/check.h>
 #include <util/hash_type.h>
 
-#include <cassert>
 #include <vector>
 
 typedef std::vector<unsigned char> valtype;
 
 ScriptHash::ScriptHash(const CScript& in) : BaseHash(Hash160(in)) {}
-ScriptHash::ScriptHash(const CScriptID& in) : BaseHash{in} {}
 
 PKHash::PKHash(const CPubKey& pubkey) : BaseHash(pubkey.GetID()) {}
 PKHash::PKHash(const CKeyID& pubkey_id) : BaseHash(pubkey_id) {}
@@ -101,7 +100,7 @@ bool ExtractDestination(const CScript& scriptPubKey, CTxDestination& addressRet)
         addressRet = CNoDestination(scriptPubKey);
         return false;
     } // no default case, so the compiler can warn about missing cases
-    assert(false);
+    AssertUnreachable();
 }
 
 namespace {

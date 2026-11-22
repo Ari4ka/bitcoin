@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-export LC_ALL=C
+export LC_ALL=C.UTF-8
 set -Eeuo pipefail
 
 # Declare paths to libraries
@@ -8,10 +8,10 @@ declare -A LIBS
 LIBS[cli]="libbitcoin_cli.a"
 LIBS[common]="libbitcoin_common.a"
 LIBS[consensus]="libbitcoin_consensus.a"
-LIBS[crypto]="crypto/libbitcoin_crypto.a"
+LIBS[crypto]="libbitcoin_crypto.a"
 LIBS[node]="libbitcoin_node.a"
-LIBS[util]="util/libbitcoin_util.a"
-LIBS[wallet]="wallet/libbitcoin_wallet.a"
+LIBS[util]="libbitcoin_util.a"
+LIBS[wallet]="libbitcoin_wallet.a"
 
 # Declare allowed dependencies "X Y" where X is allowed to depend on Y. This
 # list is taken from doc/design/libraries.md.
@@ -41,9 +41,6 @@ ALLOWED_DEPENDENCIES+=(
 
 # Declare list of known errors that should be suppressed.
 declare -A SUPPRESS
-# init.cpp file currently calls Berkeley DB sanity check function on startup, so
-# there is an undocumented dependency of the node library on the wallet library.
-SUPPRESS["init.cpp.o bdb.cpp.o _ZN6wallet27BerkeleyDatabaseSanityCheckEv"]=1
 # init/common.cpp file calls InitError and InitWarning from interface_ui which
 # is currently part of the node library. interface_ui should just be part of the
 # common library instead, and is moved in
@@ -125,10 +122,10 @@ check_disallowed() {
     local result=0
 
     # Loop over symbol names exported by dst and imported by src
-    while read symbol; do
+    while read -r symbol; do
         local dst_obj
         dst_obj=$(obj_names "$symbol" "${temp_dir}/${dst}_exports.txt")
-        while read src_obj; do
+        while read -r src_obj; do
             if ! check_suppress "$src_obj" "$dst_obj" "$symbol"; then
                 echo "Error: $src_obj depends on $dst_obj symbol '$(c++filt "$symbol")', can suppress with:"
                 echo "    SUPPRESS[\"$src_obj $dst_obj $symbol\"]=1"
@@ -149,7 +146,7 @@ check_suppress() {
     local dst_obj="$2"
     local symbol="$3"
     for suppress in "${!SUPPRESS[@]}"; do
-        read suppress_src suppress_dst suppress_pattern <<<"$suppress"
+        read -r suppress_src suppress_dst suppress_pattern <<<"$suppress"
         if [[ "$src_obj" == "$suppress_src" && "$dst_obj" == "$suppress_dst" && "$symbol" =~ $suppress_pattern ]]; then
             SUPPRESSED["$suppress"]=1
             return 0
@@ -187,7 +184,7 @@ fi
 # shellcheck disable=SC2046
 cmake --build "$BUILD_DIR" -j"$(nproc)" -t $(lib_targets)
 TEMP_DIR="$(mktemp -d)"
-cd "$BUILD_DIR/src"
+cd "$BUILD_DIR/lib"
 extract_symbols "$TEMP_DIR"
 if check_libraries "$TEMP_DIR"; then
     echo "Success! No unexpected dependencies were detected."

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2016-2021 The Bitcoin Core developers
+# Copyright (c) 2016-present The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test processing of feefilter messages."""
@@ -46,8 +46,7 @@ class TestP2PConn(P2PInterface):
 class FeeFilterTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
-        # whitelist peers to speed up tx relay / mempool sync
-        self.noban_tx_relay = True
+        self.noban_tx_relay = True  # faster tx relay
         # We lower the various required feerates for this test
         # to catch a corner-case where feefilter used to slightly undercut
         # mempool and wallet feerate calculation based on GetFee

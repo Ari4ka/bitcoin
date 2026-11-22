@@ -2,47 +2,64 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <wallet/spend.h>
+
+#include <addresstype.h>
 #include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/fuzz.h>
 #include <test/fuzz/util.h>
 #include <test/fuzz/util/wallet.h>
 #include <test/util/random.h>
 #include <test/util/setup_common.h>
+#include <test/util/time.h>
+#include <util/check.h>
 #include <util/time.h>
+#include <validation.h>
 #include <wallet/coincontrol.h>
 #include <wallet/context.h>
-#include <wallet/spend.h>
 #include <wallet/test/util.h>
 #include <wallet/wallet.h>
-#include <validation.h>
-#include <addresstype.h>
 
 using util::ToString;
 
 namespace wallet {
 namespace {
 const TestingSetup* g_setup;
+FuzzedWallet* g_wallet;
 
 void initialize_setup()
 {
     static const auto testing_setup = MakeNoLogFileContext<const TestingSetup>();
     g_setup = testing_setup.get();
+    static FuzzedWallet fuzzed_wallet{
+        *g_setup->m_node.chain,
+        "fuzzed_wallet_a",
+        "tprv8ZgxMBicQKsPd1QwsGgzfu2pcPYbBosZhJknqreRHgsWx32nNEhMjGQX2cgFL8n6wz9xdDYwLcs78N4nsCo32cxEX8RBtwGsEGgybLiQJfk",
+    };
+    g_wallet = &fuzzed_wallet;
 }
 
 FUZZ_TARGET(wallet_create_transaction, .init = initialize_setup)
 {
     SeedRandomStateForTest(SeedRand::ZEROS);
     FuzzedDataProvider fuzzed_data_provider{buffer.data(), buffer.size()};
-    SetMockTime(ConsumeTime(fuzzed_data_provider));
+    FakeNodeClock clock{ConsumeTime(fuzzed_data_provider)};
     const auto& node = g_setup->m_node;
     Chainstate& chainstate{node.chainman->ActiveChainstate()};
     ArgsManager& args = *node.args;
     args.ForceSetArg("-dustrelayfee", ToString(fuzzed_data_provider.ConsumeIntegralInRange<CAmount>(0, MAX_MONEY)));
-    FuzzedWallet fuzzed_wallet{
-        *g_setup->m_node.chain,
-        "fuzzed_wallet_a",
-        "tprv8ZgxMBicQKsPd1QwsGgzfu2pcPYbBosZhJknqreRHgsWx32nNEhMjGQX2cgFL8n6wz9xdDYwLcs78N4nsCo32cxEX8RBtwGsEGgybLiQJfk",
-    };
+    FuzzedWallet& fuzzed_wallet{*g_wallet};
+    fuzzed_wallet.Reset();
+    struct DriftCheck {
+        FuzzedWallet& w;
+        int64_t before;
+        ~DriftCheck()
+        {
+            const int64_t drift{w.RangeTotal() - before};
+            assert(drift >= 0);
+            assert(drift <= 2);
+        }
+    } drift_check{fuzzed_wallet, fuzzed_wallet.RangeTotal()};
 
     CCoinControl coin_control;
     if (fuzzed_data_provider.ConsumeBool()) coin_control.m_version = fuzzed_data_provider.ConsumeIntegral<unsigned int>();
@@ -58,8 +75,7 @@ FUZZ_TARGET(wallet_create_transaction, .init = initialize_setup)
 
     int next_locktime{0};
     CAmount all_values{0};
-    LIMITED_WHILE(fuzzed_data_provider.ConsumeBool(), 10000)
-    {
+    LIMITED_WHILE (fuzzed_data_provider.ConsumeBool(), 10000) {
         CMutableTransaction tx;
         tx.nLockTime = next_locktime++;
         tx.vout.resize(1);
@@ -72,10 +88,11 @@ FUZZ_TARGET(wallet_create_transaction, .init = initialize_setup)
         auto txid{tx.GetHash()};
         auto ret{fuzzed_wallet.wallet->mapWallet.emplace(std::piecewise_construct, std::forward_as_tuple(txid), std::forward_as_tuple(MakeTransactionRef(std::move(tx)), TxStateConfirmed{chainstate.m_chain.Tip()->GetBlockHash(), chainstate.m_chain.Height(), /*index=*/0}))};
         assert(ret.second);
+        fuzzed_wallet.wallet->RefreshTXOsFromTx(ret.first->second);
     }
 
     std::vector<CRecipient> recipients;
-    LIMITED_WHILE(fuzzed_data_provider.ConsumeBool(), 100) {
+    LIMITED_WHILE (fuzzed_data_provider.ConsumeBool(), 100) {
         CTxDestination destination;
         CallOneOf(
             fuzzed_data_provider,

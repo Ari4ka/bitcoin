@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2021 The Bitcoin Core developers
+// Copyright (c) 2011-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -47,8 +47,6 @@ class BanTableModel : public QAbstractTableModel
 public:
     explicit BanTableModel(interfaces::Node& node, QObject* parent);
     ~BanTableModel();
-    void startAutoRefresh();
-    void stopAutoRefresh();
 
     enum ColumnIndex {
         Address = 0,

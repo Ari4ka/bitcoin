@@ -1,0 +1,87 @@
+// Copyright (c) 2025-present The Bitcoin Core developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
+#include <util/exec.h>
+
+#include <util/fs.h>
+#ifdef WIN32
+#include <util/subprocess.h>
+#endif
+
+#include <cstdlib>
+#include <string>
+#include <system_error>
+
+#ifdef WIN32
+#include <process.h>
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
+namespace util {
+int ExecVp(const char* file, char* const argv[])
+{
+#ifndef WIN32
+    return execvp(file, argv);
+#else
+    std::vector<std::string> escaped_args;
+    for (char* const* arg_ptr{argv}; *arg_ptr; ++arg_ptr) {
+        subprocess::util::quote_argument(std::string{*arg_ptr}, escaped_args.emplace_back(), /*force=*/false);
+    }
+
+    std::vector<const char*> new_argv;
+    new_argv.reserve(escaped_args.size() + 1);
+    for (const auto& s : escaped_args) new_argv.push_back(s.c_str());
+    new_argv.push_back(nullptr);
+    // Spawn the child process and wait for it to exit. We can't use _execvp
+    // here (the Windows counterpart of POSIX execvp above): on Windows _execvp
+    // creates a new child and immediately exits the parent, so anything waiting
+    // on the parent (e.g. a test framework) sees it exit with code 0 before the
+    // child finishes. Use _P_NOWAIT + _cwait instead of _P_WAIT so a child exit
+    // code of -1 is not confused with a spawn failure (both return -1 with _P_WAIT).
+    intptr_t child{_spawnvp(_P_NOWAIT, file, new_argv.data())};
+    if (child == -1) return -1;
+    int status{0};
+    if (_cwait(&status, child, _WAIT_CHILD) == -1) return -1;
+    _exit(status); // forward child exit code; never returns
+#endif
+}
+
+fs::path GetExePath(std::string_view argv0)
+{
+    // Try to figure out where executable is located. This does a simplified
+    // search that won't work perfectly on every platform and doesn't need to,
+    // as it is only currently being used in a convenience wrapper binary to try
+    // to prioritize locally built or installed executables over system
+    // executables.
+    const fs::path argv0_path{fs::PathFromString(std::string{argv0})};
+    fs::path path{argv0_path};
+    std::error_code ec;
+#ifndef WIN32
+    // If argv0 doesn't contain a path separator, it was invoked from the system
+    // PATH and can be searched for there.
+    if (!argv0_path.has_parent_path()) {
+        if (const char* path_env = std::getenv("PATH")) {
+            size_t start{0}, end{0};
+            for (std::string_view paths{path_env}; end != std::string_view::npos; start = end + 1) {
+                end = paths.find(':', start);
+                fs::path candidate = fs::path(paths.substr(start, end - start)) / argv0_path;
+                if (fs::is_regular_file(candidate, ec)) {
+                    path = candidate;
+                    break;
+                }
+            }
+        }
+    }
+#else
+    wchar_t module_path[MAX_PATH];
+    if (GetModuleFileNameW(nullptr, module_path, MAX_PATH) > 0) {
+        path = fs::path{module_path};
+    }
+#endif
+    return path;
+}
+
+} // namespace util

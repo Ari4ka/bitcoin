@@ -1,5 +1,5 @@
 // Copyright (c) 2017, 2021 Pieter Wuille
-// Copyright (c) 2021-2022 The Bitcoin Core developers
+// Copyright (c) 2021-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -7,8 +7,7 @@
 #include <util/vector.h>
 
 #include <array>
-#include <assert.h>
-#include <numeric>
+#include <cassert>
 #include <optional>
 
 namespace bech32
@@ -404,8 +403,7 @@ std::pair<std::string, std::vector<int>> LocateErrors(const std::string& str, Ch
     std::vector<int> error_locations{};
 
     if (str.size() > limit) {
-        error_locations.resize(str.size() - limit);
-        std::iota(error_locations.begin(), error_locations.end(), static_cast<int>(limit));
+        error_locations.push_back(static_cast<int>(limit));
         return std::make_pair("Bech32 string too long", std::move(error_locations));
     }
 

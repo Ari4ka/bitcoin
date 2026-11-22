@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2020 The Bitcoin Core developers
+// Copyright (c) 2009-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -13,24 +13,20 @@
 
 struct FlatFilePos
 {
-    int nFile{-1};
-    unsigned int nPos{0};
+    int32_t nFile{-1};
+    uint64_t nPos{0};
 
     SERIALIZE_METHODS(FlatFilePos, obj) { READWRITE(VARINT_MODE(obj.nFile, VarIntMode::NONNEGATIVE_SIGNED), VARINT(obj.nPos)); }
 
     FlatFilePos() = default;
 
-    FlatFilePos(int nFileIn, unsigned int nPosIn) :
-        nFile(nFileIn),
-        nPos(nPosIn)
+    FlatFilePos(int32_t nFileIn, uint64_t nPosIn)
+        : nFile{nFileIn},
+          nPos{nPosIn}
     {}
 
     friend bool operator==(const FlatFilePos &a, const FlatFilePos &b) {
         return (a.nFile == b.nFile && a.nPos == b.nPos);
-    }
-
-    friend bool operator!=(const FlatFilePos &a, const FlatFilePos &b) {
-        return !(a == b);
     }
 
     bool IsNull() const { return (nFile == -1); }
@@ -47,7 +43,7 @@ class FlatFileSeq
 private:
     const fs::path m_dir;
     const char* const m_prefix;
-    const size_t m_chunk_size;
+    const uint64_t m_chunk_size;
 
 public:
     /**
@@ -57,7 +53,7 @@ public:
      * @param prefix A short prefix given to all file names.
      * @param chunk_size Disk space is pre-allocated in multiples of this amount.
      */
-    FlatFileSeq(fs::path dir, const char* prefix, size_t chunk_size);
+    FlatFileSeq(fs::path dir, const char* prefix, uint64_t chunk_size);
 
     /** Get the name of the file at the given position. */
     fs::path FileName(const FlatFilePos& pos) const;
@@ -74,7 +70,7 @@ public:
      * @param[out] out_of_space Whether the allocation failed due to insufficient disk space.
      * @return The number of bytes successfully allocated.
      */
-    size_t Allocate(const FlatFilePos& pos, size_t add_size, bool& out_of_space) const;
+    uint64_t Allocate(const FlatFilePos& pos, uint64_t add_size, bool& out_of_space) const;
 
     /**
      * Commit a file to disk, and optionally truncate off extra pre-allocated bytes if final.

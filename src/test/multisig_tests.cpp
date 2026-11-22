@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2022 The Bitcoin Core developers
+// Copyright (c) 2011-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -9,6 +9,7 @@
 #include <script/script_error.h>
 #include <script/sign.h>
 #include <script/signingprovider.h>
+#include <test/util/common.h>
 #include <test/util/setup_common.h>
 #include <test/util/transaction_utils.h>
 #include <tinyformat.h>
@@ -38,7 +39,7 @@ sign_multisig(const CScript& scriptPubKey, const std::vector<CKey>& keys, const 
 
 BOOST_AUTO_TEST_CASE(multisig_verify)
 {
-    unsigned int flags = SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_STRICTENC;
+    script_verify_flags flags = SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_STRICTENC;
 
     ScriptError err;
     CKey key[4];
@@ -56,19 +57,21 @@ BOOST_AUTO_TEST_CASE(multisig_verify)
     escrow << OP_2 << ToByteVector(key[0].GetPubKey()) << ToByteVector(key[1].GetPubKey()) << ToByteVector(key[2].GetPubKey()) << OP_3 << OP_CHECKMULTISIG;
 
     CMutableTransaction txFrom;  // Funding transaction
-    txFrom.vout.resize(3);
-    txFrom.vout[0].scriptPubKey = a_and_b;
-    txFrom.vout[1].scriptPubKey = a_or_b;
-    txFrom.vout[2].scriptPubKey = escrow;
+    txFrom.vout = {
+        CTxOut{-1, a_and_b},
+        CTxOut{-1, a_or_b},
+        CTxOut{-1, escrow},
+    };
 
     CMutableTransaction txTo[3]; // Spending transaction
-    for (int i = 0; i < 3; i++)
+    for (uint32_t i = 0; i < 3; i++)
     {
-        txTo[i].vin.resize(1);
-        txTo[i].vout.resize(1);
-        txTo[i].vin[0].prevout.n = i;
-        txTo[i].vin[0].prevout.hash = txFrom.GetHash();
-        txTo[i].vout[0].nValue = 1;
+        txTo[i].vin = {
+            CTxIn{COutPoint{txFrom.GetHash(), i}},
+        };
+        txTo[i].vout = {
+            CTxOut{1, CScript{}},
+        };
     }
 
     std::vector<CKey> keys;
@@ -144,7 +147,7 @@ BOOST_AUTO_TEST_CASE(multisig_IsStandard)
 
     const auto is_standard{[](const CScript& spk) {
         TxoutType type;
-        bool res{::IsStandard(spk, std::nullopt, type)};
+        bool res{::IsStandard(spk, type)};
         if (res) {
             BOOST_CHECK_EQUAL(type, TxoutType::MULTISIG);
         }
@@ -201,19 +204,21 @@ BOOST_AUTO_TEST_CASE(multisig_Sign)
     escrow << OP_2 << ToByteVector(key[0].GetPubKey()) << ToByteVector(key[1].GetPubKey()) << ToByteVector(key[2].GetPubKey()) << OP_3 << OP_CHECKMULTISIG;
 
     CMutableTransaction txFrom;  // Funding transaction
-    txFrom.vout.resize(3);
-    txFrom.vout[0].scriptPubKey = a_and_b;
-    txFrom.vout[1].scriptPubKey = a_or_b;
-    txFrom.vout[2].scriptPubKey = escrow;
+    txFrom.vout = {
+        CTxOut{-1, a_and_b},
+        CTxOut{-1, a_or_b},
+        CTxOut{-1, escrow},
+    };
 
     CMutableTransaction txTo[3]; // Spending transaction
-    for (int i = 0; i < 3; i++)
+    for (uint32_t i = 0; i < 3; i++)
     {
-        txTo[i].vin.resize(1);
-        txTo[i].vout.resize(1);
-        txTo[i].vin[0].prevout.n = i;
-        txTo[i].vin[0].prevout.hash = txFrom.GetHash();
-        txTo[i].vout[0].nValue = 1;
+        txTo[i].vin = {
+            CTxIn{COutPoint{txFrom.GetHash(), i}},
+        };
+        txTo[i].vout = {
+            CTxOut{1, CScript{}},
+        };
     }
 
     for (int i = 0; i < 3; i++)

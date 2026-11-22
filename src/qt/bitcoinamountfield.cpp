@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2022 The Bitcoin Core developers
+// Copyright (c) 2011-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -83,11 +83,6 @@ public:
     void SetMinValue(const CAmount& value)
     {
         m_min_amount = value;
-    }
-
-    void SetMaxValue(const CAmount& value)
-    {
-        m_max_amount = value;
     }
 
     void stepBy(int steps) override
@@ -309,16 +304,6 @@ void BitcoinAmountField::SetAllowEmpty(bool allow)
 void BitcoinAmountField::SetMinValue(const CAmount& value)
 {
     amount->SetMinValue(value);
-}
-
-void BitcoinAmountField::SetMaxValue(const CAmount& value)
-{
-    amount->SetMaxValue(value);
-}
-
-void BitcoinAmountField::setReadOnly(bool fReadOnly)
-{
-    amount->setReadOnly(fReadOnly);
 }
 
 void BitcoinAmountField::unitChanged(int idx)

@@ -1,8 +1,6 @@
-// Copyright (c) 2011-2022 The Bitcoin Core developers
+// Copyright (c) 2011-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
-
-#include <bitcoin-build-config.h> // IWYU pragma: keep
 
 #include <qt/clientmodel.h>
 
@@ -23,7 +21,7 @@
 #include <util/time.h>
 #include <validation.h>
 
-#include <stdint.h>
+#include <cstdint>
 
 #include <QDebug>
 #include <QMetaObject>
@@ -129,15 +127,6 @@ std::map<CNetAddr, LocalServiceInfo> ClientModel::getNetLocalAddresses() const
     return m_node.getNetLocalAddresses();
 }
 
-
-int ClientModel::getNumBlocks() const
-{
-    if (m_cached_num_blocks == -1) {
-        m_cached_num_blocks = m_node.getNumBlocks();
-    }
-    return m_cached_num_blocks;
-}
-
 uint256 ClientModel::getBestBlockHash()
 {
     uint256 tip{WITH_LOCK(m_cached_tip_mutex, return m_cached_tip_blocks)};
@@ -203,14 +192,9 @@ QString ClientModel::formatSubVersion() const
     return QString::fromStdString(strSubVersion);
 }
 
-bool ClientModel::isReleaseVersion() const
-{
-    return CLIENT_VERSION_IS_RELEASE;
-}
-
 QString ClientModel::formatClientStartupTime() const
 {
-    return QDateTime::fromSecsSinceEpoch(GetStartupTime()).toString();
+    return QDateTime::currentDateTime().addSecs(-TicksSeconds(GetUptime())).toString();
 }
 
 QString ClientModel::dataDir() const
@@ -230,7 +214,6 @@ void ClientModel::TipChanged(SynchronizationState sync_state, interfaces::BlockT
         cachedBestHeaderHeight = tip.block_height;
         cachedBestHeaderTime = tip.block_time;
     } else if (synctype == SyncType::BLOCK_SYNC) {
-        m_cached_num_blocks = tip.block_height;
         WITH_LOCK(m_cached_tip_mutex, m_cached_tip_blocks = tip.block_hash;);
     }
 
@@ -287,10 +270,11 @@ void ClientModel::unsubscribeFromCoreSignals()
 
 bool ClientModel::getProxyInfo(std::string& ip_port) const
 {
-    Proxy ipv4, ipv6;
-    if (m_node.getProxy((Network) 1, ipv4) && m_node.getProxy((Network) 2, ipv6)) {
-      ip_port = ipv4.proxy.ToStringAddrPort();
-      return true;
+    const auto ipv4 = m_node.getProxy(NET_IPV4);
+    const auto ipv6 = m_node.getProxy(NET_IPV6);
+    if (ipv4 && ipv6) {
+        ip_port = ipv4->proxy.ToStringAddrPort();
+        return true;
     }
     return false;
 }

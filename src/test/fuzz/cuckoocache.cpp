@@ -1,13 +1,16 @@
-// Copyright (c) 2020-2021 The Bitcoin Core developers
+// Copyright (c) 2020-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <cuckoocache.h>
+
 #include <script/sigcache.h>
 #include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/fuzz.h>
 #include <test/fuzz/util.h>
 #include <test/util/setup_common.h>
+#include <util/byte_units.h>
+#include <util/check.h>
 
 #include <cstdint>
 #include <string>
@@ -33,11 +36,11 @@ FUZZ_TARGET(cuckoocache)
     CuckooCache::cache<int, RandomHasher> cuckoo_cache{};
     if (fuzzed_data_provider.ConsumeBool()) {
         const size_t megabytes = fuzzed_data_provider.ConsumeIntegralInRange<size_t>(0, 16);
-        cuckoo_cache.setup_bytes(megabytes << 20);
+        cuckoo_cache.setup_bytes(megabytes * 1_MiB);
     } else {
         cuckoo_cache.setup(fuzzed_data_provider.ConsumeIntegralInRange<uint32_t>(0, 4096));
     }
-    LIMITED_WHILE(fuzzed_data_provider.ConsumeBool(), 10000) {
+    LIMITED_WHILE (fuzzed_data_provider.ConsumeBool(), 10000) {
         if (fuzzed_data_provider.ConsumeBool()) {
             cuckoo_cache.insert(fuzzed_data_provider.ConsumeBool());
         } else {

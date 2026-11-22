@@ -1,20 +1,21 @@
-// Copyright (c) 2019-2021 The Bitcoin Core developers
+// Copyright (c) 2019-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
+#include <primitives/block.h>
 
 #include <chainparams.h>
 #include <consensus/merkle.h>
 #include <consensus/validation.h>
 #include <core_io.h>
 #include <core_memusage.h>
-#include <primitives/block.h>
 #include <pubkey.h>
 #include <streams.h>
 #include <test/fuzz/fuzz.h>
 #include <util/chaintype.h>
+#include <util/check.h>
 #include <validation.h>
 
-#include <cassert>
 #include <string>
 
 void initialize_block()
@@ -24,10 +25,9 @@ void initialize_block()
 
 FUZZ_TARGET(block, .init = initialize_block)
 {
-    DataStream ds{buffer};
     CBlock block;
     try {
-        ds >> TX_WITH_WITNESS(block);
+        SpanReader{buffer} >> TX_WITH_WITNESS(block);
     } catch (const std::ios_base::failure&) {
         return;
     }

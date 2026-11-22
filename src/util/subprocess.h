@@ -1,6 +1,11 @@
 // Based on the https://github.com/arun11299/cpp-subprocess project.
 
+#ifndef BITCOIN_UTIL_SUBPROCESS_H
+#define BITCOIN_UTIL_SUBPROCESS_H
+
 /*!
+@file
+@brief C++ subprocessing library.
 
 Documentation for C++ subprocessing library.
 
@@ -33,13 +38,10 @@ Documentation for C++ subprocessing library.
 @version 1.0.0
 */
 
-#ifndef BITCOIN_UTIL_SUBPROCESS_H
-#define BITCOIN_UTIL_SUBPROCESS_H
-
+#include <util/check.h>
 #include <util/syserror.h>
 
 #include <algorithm>
-#include <cassert>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -48,30 +50,16 @@ Documentation for C++ subprocessing library.
 #include <future>
 #include <initializer_list>
 #include <iostream>
-#include <locale>
 #include <map>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#if (defined _MSC_VER) || (defined __MINGW32__)
-  #define __USING_WINDOWS__
-#endif
-
-#ifdef __USING_WINDOWS__
-  #include <codecvt>
-#endif
-
 extern "C" {
-#ifdef __USING_WINDOWS__
-  #include <Windows.h>
+#ifdef WIN32
+  #include <windows.h>
   #include <io.h>
-  #include <cwchar>
-
-  #define close _close
-  #define open _open
-  #define fileno _fileno
 #else
   #include <sys/wait.h>
   #include <unistd.h>
@@ -80,6 +68,22 @@ extern "C" {
   #include <fcntl.h>
   #include <sys/types.h>
 }
+
+// The Microsoft C++ compiler issues deprecation warnings
+// for the standard POSIX function names.
+// Its preferred implementations have a leading underscore.
+// See: https://learn.microsoft.com/en-us/cpp/c-runtime-library/compatibility.
+#if (defined _MSC_VER)
+  #define subprocess_close _close
+  #define subprocess_fileno _fileno
+  #define subprocess_open _open
+  #define subprocess_write _write
+#else
+  #define subprocess_close close
+  #define subprocess_fileno fileno
+  #define subprocess_open open
+  #define subprocess_write write
+#endif
 
 /*!
  * Getting started with reading this source code.
@@ -108,12 +112,12 @@ namespace subprocess {
 
 // Max buffer size allocated on stack for read error
 // from pipe
-static const size_t SP_MAX_ERR_BUF_SIZ = 1024;
+inline constexpr size_t SP_MAX_ERR_BUF_SIZ = 1024;
 
 // Default buffer capacity for OutBuffer and ErrBuffer.
 // If the data exceeds this capacity, the buffer size is grown
 // by 1.5 times its previous capacity
-static const size_t DEFAULT_BUF_CAP_BYTES = 8192;
+inline constexpr size_t DEFAULT_BUF_CAP_BYTES = 8192;
 
 
 /*-----------------------------------------------
@@ -159,9 +163,13 @@ public:
 //--------------------------------------------------------------------
 namespace util
 {
-  inline void quote_argument(const std::wstring &argument, std::wstring &command_line,
+#ifdef WIN32
+  inline void quote_argument(const std::string &argument, std::string &command_line,
                       bool force)
   {
+    constexpr char quote = '"';
+    constexpr char backslash = '\\';
+
     //
     // Unless we're told otherwise, don't quote unless we actually
     // need to do so --- hopefully avoid problems if programs won't
@@ -169,16 +177,16 @@ namespace util
     //
 
     if (force == false && argument.empty() == false &&
-        argument.find_first_of(L" \t\n\v\"") == argument.npos) {
+        argument.find_first_of(" \t\n\v") == argument.npos) {
       command_line.append(argument);
     }
     else {
-      command_line.push_back(L'"');
+      command_line.push_back(quote);
 
       for (auto it = argument.begin();; ++it) {
         unsigned number_backslashes = 0;
 
-        while (it != argument.end() && *it == L'\\') {
+        while (it != argument.end() && *it == backslash) {
           ++it;
           ++number_backslashes;
         }
@@ -191,17 +199,17 @@ namespace util
           // as a metacharacter.
           //
 
-          command_line.append(number_backslashes * 2, L'\\');
+          command_line.append(number_backslashes * 2, backslash);
           break;
         }
-        else if (*it == L'"') {
+        else if (*it == quote) {
 
           //
           // Escape all backslashes and the following
           // double quotation mark.
           //
 
-          command_line.append(number_backslashes * 2 + 1, L'\\');
+          command_line.append(number_backslashes * 2 + 1, backslash);
           command_line.push_back(*it);
         }
         else {
@@ -210,16 +218,15 @@ namespace util
           // Backslashes aren't special here.
           //
 
-          command_line.append(number_backslashes, L'\\');
+          command_line.append(number_backslashes, backslash);
           command_line.push_back(*it);
         }
       }
 
-      command_line.push_back(L'"');
+      command_line.push_back(quote);
     }
   }
 
-#ifdef __USING_WINDOWS__
   inline std::string get_last_error(DWORD errorMessageID)
   {
     if (errorMessageID == 0)
@@ -264,7 +271,7 @@ namespace util
 
     FILE *fp = _fdopen(os_fhandle, mode);
     if (fp == 0) {
-      _close(os_fhandle);
+      subprocess_close(os_fhandle);
       throw OSError("_fdopen", 0);
     }
 
@@ -292,12 +299,11 @@ namespace util
 
   /*!
    * Function: split
-   * Parameters:
-   * [in] str : Input string which needs to be split based upon the
-   *            delimiters provided.
-   * [in] deleims : Delimiter characters based upon which the string needs
-   *                to be split. Default constructed to ' '(space) and '\t'(tab)
-   * [out] vector<string> : Vector of strings split at deleimiter.
+   * @param[in] str    Input string which needs to be split based upon the
+   *                   delimiters provided.
+   * @param[in] delims Delimiter characters based upon which the string needs
+   *                   to be split. Default constructed to space and tab.
+   * @return Vector of strings split at delimiter.
    */
   static inline std::vector<std::string>
   split(const std::string& str, const std::string& delims=" \t")
@@ -320,24 +326,27 @@ namespace util
   }
 
 
-#ifndef __USING_WINDOWS__
+#ifndef WIN32
   /*!
    * Function: set_clo_on_exec
    * Sets/Resets the FD_CLOEXEC flag on the provided file descriptor
    * based upon the `set` parameter.
-   * Parameters:
-   * [in] fd : The descriptor on which FD_CLOEXEC needs to be set/reset.
-   * [in] set : If 'true', set FD_CLOEXEC.
-   *            If 'false' unset FD_CLOEXEC.
+   * @param[in] fd  The descriptor on which FD_CLOEXEC needs to be set/reset.
+   * @param[in] set If 'true', set FD_CLOEXEC.
+   *                If 'false' unset FD_CLOEXEC.
    */
   static inline
   void set_clo_on_exec(int fd, bool set = true)
   {
     int flags = fcntl(fd, F_GETFD, 0);
+    if (flags == -1) {
+        throw OSError("fcntl F_GETFD failed", errno);
+    }
     if (set) flags |= FD_CLOEXEC;
     else flags &= ~FD_CLOEXEC;
-    //TODO: should check for errors
-    fcntl(fd, F_SETFD, flags);
+    if (fcntl(fd, F_SETFD, flags) == -1) {
+        throw OSError("fcntl F_SETFD failed", errno);
+    }
   }
 
 
@@ -345,8 +354,7 @@ namespace util
    * Function: pipe_cloexec
    * Creates a pipe and sets FD_CLOEXEC flag on both
    * read and write descriptors of the pipe.
-   * Parameters:
-   * [out] : A pair of file descriptors.
+   * @return A pair of file descriptors.
    *         First element of pair is the read descriptor of pipe.
    *         Second element is the write descriptor of pipe.
    */
@@ -371,19 +379,18 @@ namespace util
    * Function: write_n
    * Writes `length` bytes to the file descriptor `fd`
    * from the buffer `buf`.
-   * Parameters:
-   * [in] fd : The file descriptotr to write to.
-   * [in] buf: Buffer from which data needs to be written to fd.
-   * [in] length: The number of bytes that needs to be written from
-   *              `buf` to `fd`.
-   * [out] int : Number of bytes written or -1 in case of failure.
+   * @param[in] fd     The file descriptor to write to.
+   * @param[in] buf    Buffer from which data needs to be written to fd.
+   * @param[in] length The number of bytes that needs to be written from
+   *                   `buf` to `fd`.
+   * @return Number of bytes written or -1 in case of failure.
    */
   static inline
   int write_n(int fd, const char* buf, size_t length)
   {
     size_t nwritten = 0;
     while (nwritten < length) {
-      int written = write(fd, buf + nwritten, length - nwritten);
+      int written = subprocess_write(fd, buf + nwritten, length - nwritten);
       if (written == -1) return -1;
       nwritten += written;
     }
@@ -395,12 +402,12 @@ namespace util
    * Function: read_atmost_n
    * Reads at the most `read_upto` bytes from the
    * file object `fp` before returning.
-   * Parameters:
-   * [in] fp : The file object from which it needs to read.
-   * [in] buf : The buffer into which it needs to write the data.
-   * [in] read_upto: Max number of bytes which must be read from `fd`.
-   * [out] int : Number of bytes written to `buf` or read from `fd`
-   *             OR -1 in case of error.
+   * @param[in]  fp        The file object from which it needs to read.
+   * @param[out] buf       The buffer into which it needs to write the data.
+   * @param[in]  read_upto Max number of bytes which must be read from `fd`.
+   * @return Number of bytes written to `buf` or read from `fd`
+   *         OR -1 in case of error.
+   *
    *  NOTE: In case of EINTR while reading from socket, this API
    *  will retry to read from `fd`, but only till the EINTR counter
    *  reaches 50 after which it will return with whatever data it read.
@@ -408,10 +415,10 @@ namespace util
   static inline
   int read_atmost_n(FILE* fp, char* buf, size_t read_upto)
   {
-#ifdef __USING_WINDOWS__
+#ifdef WIN32
     return (int)fread(buf, 1, read_upto, fp);
 #else
-    int fd = fileno(fp);
+    int fd = subprocess_fileno(fp);
     int rbytes = 0;
     int eintr_cnter = 0;
 
@@ -438,11 +445,10 @@ namespace util
    * Function: read_all
    * Reads all the available data from `fp` into
    * `buf`. Internally calls read_atmost_n.
-   * Parameters:
-   * [in] fp : The file object from which to read from.
-   * [in] buf : The buffer of type `class Buffer` into which
-   *            the read data is written to.
-   * [out] int: Number of bytes read OR -1 in case of failure.
+   * @param[in]     fp  The file object from which to read from.
+   * @param[in,out] buf The buffer of type `class Buffer` into which
+   *                    the read data is written to.
+   * @return Number of bytes read OR -1 in case of failure.
    *
    * NOTE: `class Buffer` is a exposed public class. See below.
    */
@@ -481,14 +487,13 @@ namespace util
     return total_bytes_read;
   }
 
-#ifndef __USING_WINDOWS__
+#ifndef WIN32
   /*!
    * Function: wait_for_child_exit
    * Waits for the process with pid `pid` to exit
    * and returns its status.
-   * Parameters:
-   * [in] pid : The pid of the process.
-   * [out] pair<int, int>:
+   * @param[in] pid The pid of the process.
+   * @return pair<int, int>:
    *    pair.first : Return code of the waitpid call.
    *    pair.second : Exit status of the process.
    *
@@ -527,7 +532,7 @@ struct string_arg
 {
   string_arg(const char* arg): arg_value(arg) {}
   string_arg(std::string&& arg): arg_value(std::move(arg)) {}
-  string_arg(std::string arg): arg_value(std::move(arg)) {}
+  string_arg(const std::string& arg): arg_value(arg) {}
   std::string arg_value;
 };
 
@@ -573,16 +578,16 @@ struct input
   explicit input(int fd): rd_ch_(fd) {}
 
   // FILE pointer.
-  explicit input (FILE* fp):input(fileno(fp)) { assert(fp); }
+  explicit input (FILE* fp):input(subprocess_fileno(fp)) { assert(fp); }
 
   explicit input(const char* filename) {
-    int fd = open(filename, O_RDONLY);
+    int fd = subprocess_open(filename, O_RDONLY);
     if (fd == -1) throw OSError("File not found: ", errno);
     rd_ch_ = fd;
   }
   explicit input(IOTYPE typ) {
     assert (typ == PIPE && "STDOUT/STDERR not allowed");
-#ifndef __USING_WINDOWS__
+#ifndef WIN32
     std::tie(rd_ch_, wr_ch_) = util::pipe_cloexec();
 #endif
   }
@@ -606,16 +611,16 @@ struct output
 {
   explicit output(int fd): wr_ch_(fd) {}
 
-  explicit output (FILE* fp):output(fileno(fp)) { assert(fp); }
+  explicit output (FILE* fp):output(subprocess_fileno(fp)) { assert(fp); }
 
   explicit output(const char* filename) {
-    int fd = open(filename, O_APPEND | O_CREAT | O_RDWR, 0640);
+    int fd = subprocess_open(filename, O_APPEND | O_CREAT | O_RDWR, 0640);
     if (fd == -1) throw OSError("File not found: ", errno);
     wr_ch_ = fd;
   }
   explicit output(IOTYPE typ) {
     assert (typ == PIPE && "STDOUT/STDERR not allowed");
-#ifndef __USING_WINDOWS__
+#ifndef WIN32
     std::tie(rd_ch_, wr_ch_) = util::pipe_cloexec();
 #endif
   }
@@ -637,17 +642,17 @@ struct error
 {
   explicit error(int fd): wr_ch_(fd) {}
 
-  explicit error(FILE* fp):error(fileno(fp)) { assert(fp); }
+  explicit error(FILE* fp):error(subprocess_fileno(fp)) { assert(fp); }
 
   explicit error(const char* filename) {
-    int fd = open(filename, O_APPEND | O_CREAT | O_RDWR, 0640);
+    int fd = subprocess_open(filename, O_APPEND | O_CREAT | O_RDWR, 0640);
     if (fd == -1) throw OSError("File not found: ", errno);
     wr_ch_ = fd;
   }
   explicit error(IOTYPE typ) {
     assert ((typ == PIPE || typ == STDOUT) && "STDERR not allowed");
     if (typ == PIPE) {
-#ifndef __USING_WINDOWS__
+#ifndef WIN32
       std::tie(rd_ch_, wr_ch_) = util::pipe_cloexec();
 #endif
     } else {
@@ -722,6 +727,7 @@ private:
   Popen* popen_ = nullptr;
 };
 
+#ifndef WIN32
 /*!
  * A helper class to Popen.
  * This takes care of all the fork-exec logic
@@ -743,6 +749,7 @@ private:
   Popen* parent_ = nullptr;
   int err_wr_pipe_ = -1;
 };
+#endif
 
 // Fwd Decl.
 class Streams;
@@ -758,7 +765,10 @@ class Communication
 public:
   Communication(Streams* stream): stream_(stream)
   {}
-  void operator=(const Communication&) = delete;
+  Communication(const Communication&) = delete;
+  Communication& operator=(const Communication&) = delete;
+  Communication(Communication&&) = default;
+  Communication& operator=(Communication&&) = default;
 public:
   int send(const char* msg, size_t length);
   int send(const std::vector<char>& msg);
@@ -795,7 +805,10 @@ class Streams
 {
 public:
   Streams():comm_(this) {}
-  void operator=(const Streams&) = delete;
+  Streams(const Streams&) = delete;
+  Streams& operator=(const Streams&) = delete;
+  Streams(Streams&&) = default;
+  Streams& operator=(Streams&&) = default;
 
 public:
   void setup_comm_channels();
@@ -803,28 +816,28 @@ public:
   void cleanup_fds()
   {
     if (write_to_child_ != -1 && read_from_parent_ != -1) {
-      close(write_to_child_);
+      subprocess_close(write_to_child_);
     }
     if (write_to_parent_ != -1 && read_from_child_ != -1) {
-      close(read_from_child_);
+      subprocess_close(read_from_child_);
     }
     if (err_write_ != -1 && err_read_ != -1) {
-      close(err_read_);
+      subprocess_close(err_read_);
     }
   }
 
   void close_parent_fds()
   {
-    if (write_to_child_ != -1)  close(write_to_child_);
-    if (read_from_child_ != -1) close(read_from_child_);
-    if (err_read_ != -1)        close(err_read_);
+    if (write_to_child_ != -1)  subprocess_close(write_to_child_);
+    if (read_from_child_ != -1) subprocess_close(read_from_child_);
+    if (err_read_ != -1)        subprocess_close(err_read_);
   }
 
   void close_child_fds()
   {
-    if (write_to_parent_ != -1)  close(write_to_parent_);
-    if (read_from_parent_ != -1) close(read_from_parent_);
-    if (err_write_ != -1)        close(err_write_);
+    if (write_to_parent_ != -1)  subprocess_close(write_to_parent_);
+    if (read_from_parent_ != -1) subprocess_close(read_from_parent_);
+    if (err_write_ != -1)        subprocess_close(err_write_);
   }
 
   FILE* input()  { return input_.get(); }
@@ -858,7 +871,7 @@ public:// Yes they are public
   std::shared_ptr<FILE> output_ = nullptr;
   std::shared_ptr<FILE> error_  = nullptr;
 
-#ifdef __USING_WINDOWS__
+#ifdef WIN32
   HANDLE g_hChildStd_IN_Rd = nullptr;
   HANDLE g_hChildStd_IN_Wr = nullptr;
   HANDLE g_hChildStd_OUT_Rd = nullptr;
@@ -898,8 +911,6 @@ private:
  * API's provided by the class:
  * Popen({"cmd"}, output{..}, error{..}, ....)
  *    Command provided as a sequence.
- * Popen("cmd arg1", output{..}, error{..}, ....)
- *    Command provided in a single string.
  * wait()             - Wait for the child to exit.
  * retcode()          - The return code of the exited child.
  * send(...)          - Send input to the input channel of the child.
@@ -910,20 +921,9 @@ class Popen
 {
 public:
   friend struct detail::ArgumentDeducer;
+#ifndef WIN32
   friend class detail::Child;
-
-  template <typename... Args>
-  Popen(const std::string& cmd_args, Args&& ...args):
-    args_(cmd_args)
-  {
-    vargs_ = util::split(cmd_args);
-    init_args(std::forward<Args>(args)...);
-
-    // Setup the communication channels of the Popen class
-    stream_.setup_comm_channels();
-
-    execute_process();
-  }
+#endif
 
   template <typename... Args>
   Popen(std::initializer_list<const char*> cmd_args, Args&& ...args)
@@ -999,21 +999,19 @@ private:
 private:
   detail::Streams stream_;
 
-#ifdef __USING_WINDOWS__
+#ifdef WIN32
   HANDLE process_handle_;
   std::future<void> cleanup_future_;
+#else
+  // Pid of the child process
+  int child_pid_ = -1;
 #endif
 
   std::string exe_name_;
 
-  // Command in string format
-  std::string args_;
   // Command provided as sequence
   std::vector<std::string> vargs_;
   std::vector<char*> cargv_;
-
-  // Pid of the child process
-  int child_pid_ = -1;
 
   int retcode_ = -1;
 };
@@ -1040,10 +1038,22 @@ inline void Popen::populate_c_argv()
 
 inline int Popen::wait() noexcept(false)
 {
-#ifdef __USING_WINDOWS__
+#ifdef WIN32
   int ret = WaitForSingleObject(process_handle_, INFINITE);
 
-  return 0;
+  // WaitForSingleObject with INFINITE should only return when process has signaled
+  if (ret != WAIT_OBJECT_0) {
+    throw OSError("Unexpected return code from WaitForSingleObject", 0);
+  }
+
+  DWORD dretcode_;
+
+  if (FALSE == GetExitCodeProcess(process_handle_, &dretcode_))
+      throw OSError("Failed during call to GetExitCodeProcess", 0);
+
+  CloseHandle(process_handle_);
+
+  return (int)dretcode_;
 #else
   int ret, status;
   std::tie(ret, status) = util::wait_for_child_exit(child_pid_);
@@ -1061,39 +1071,40 @@ inline int Popen::wait() noexcept(false)
 
 inline void Popen::execute_process() noexcept(false)
 {
-#ifdef __USING_WINDOWS__
+#ifdef WIN32
   if (exe_name_.length()) {
     this->vargs_.insert(this->vargs_.begin(), this->exe_name_);
     this->populate_c_argv();
   }
   this->exe_name_ = vargs_[0];
 
-  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-  std::wstring argument;
-  std::wstring command_line;
+  std::string argument;
+  std::string command_line;
+  bool first_arg = true;
 
   for (auto arg : this->vargs_) {
-    argument = converter.from_bytes(arg);
-    util::quote_argument(argument, command_line, false);
-    command_line += L" ";
+    if (!first_arg) {
+      command_line += ' ';
+    } else {
+      first_arg = false;
+    }
+    argument = arg;
+    util::quote_argument(argument, command_line, /*force=*/false);
   }
 
-  // CreateProcessW can modify szCmdLine so we allocate needed memory
-  wchar_t *szCmdline = new wchar_t[command_line.size() + 1];
-  wcscpy_s(szCmdline, command_line.size() + 1, command_line.c_str());
   PROCESS_INFORMATION piProcInfo;
-  STARTUPINFOW siStartInfo;
+  STARTUPINFOA siStartInfo;
   BOOL bSuccess = FALSE;
-  DWORD creation_flags = CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW;
+  DWORD creation_flags = CREATE_NO_WINDOW;
 
   // Set up members of the PROCESS_INFORMATION structure.
   ZeroMemory(&piProcInfo, sizeof(PROCESS_INFORMATION));
 
-  // Set up members of the STARTUPINFOW structure.
+  // Set up members of the STARTUPINFOA structure.
   // This structure specifies the STDIN and STDOUT handles for redirection.
 
-  ZeroMemory(&siStartInfo, sizeof(STARTUPINFOW));
-  siStartInfo.cb = sizeof(STARTUPINFOW);
+  ZeroMemory(&siStartInfo, sizeof(STARTUPINFOA));
+  siStartInfo.cb = sizeof(STARTUPINFOA);
 
   siStartInfo.hStdError = this->stream_.g_hChildStd_ERR_Wr;
   siStartInfo.hStdOutput = this->stream_.g_hChildStd_OUT_Wr;
@@ -1102,15 +1113,15 @@ inline void Popen::execute_process() noexcept(false)
   siStartInfo.dwFlags |= STARTF_USESTDHANDLES;
 
   // Create the child process.
-  bSuccess = CreateProcessW(NULL,
-                            szCmdline,    // command line
+  bSuccess = CreateProcessA(NULL,
+                            command_line.data(), // command line
                             NULL,         // process security attributes
                             NULL,         // primary thread security attributes
                             TRUE,         // handles are inherited
-                            creation_flags,	// creation flags
+                            creation_flags, // creation flags
                             NULL,         // use parent's environment
                             NULL,         // use parent's current directory
-                            &siStartInfo, // STARTUPINFOW pointer
+                            &siStartInfo, // STARTUPINFOA pointer
                             &piProcInfo); // receives PROCESS_INFORMATION
 
   // If an error occurs, exit the application.
@@ -1156,8 +1167,8 @@ inline void Popen::execute_process() noexcept(false)
   child_pid_ = fork();
 
   if (child_pid_ < 0) {
-    close(err_rd_pipe);
-    close(err_wr_pipe);
+    subprocess_close(err_rd_pipe);
+    subprocess_close(err_wr_pipe);
     throw OSError("fork failed", errno);
   }
 
@@ -1167,25 +1178,27 @@ inline void Popen::execute_process() noexcept(false)
     stream_.close_parent_fds();
 
     //Close the read end of the error pipe
-    close(err_rd_pipe);
+    subprocess_close(err_rd_pipe);
 
     detail::Child chld(this, err_wr_pipe);
     chld.execute_child();
   }
   else
   {
-    close (err_wr_pipe);// close child side of pipe, else get stuck in read below
+    subprocess_close(err_wr_pipe);// close child side of pipe, else get stuck in read below
 
     stream_.close_child_fds();
 
     try {
       char err_buf[SP_MAX_ERR_BUF_SIZ] = {0,};
 
-      int read_bytes = util::read_atmost_n(
-                                  fdopen(err_rd_pipe, "r"),
-                                  err_buf,
-                                  SP_MAX_ERR_BUF_SIZ);
-      close(err_rd_pipe);
+      FILE* err_fp = fdopen(err_rd_pipe, "r");
+      if (!err_fp) {
+          subprocess_close(err_rd_pipe);
+          throw OSError("fdopen failed", errno);
+      }
+      int read_bytes = util::read_atmost_n(err_fp, err_buf, SP_MAX_ERR_BUF_SIZ);
+      fclose(err_fp);
 
       if (read_bytes || strlen(err_buf)) {
         // Call waitpid to reap the child process
@@ -1196,7 +1209,7 @@ inline void Popen::execute_process() noexcept(false)
         // Throw whatever information we have about child failure
         throw CalledProcessError(err_buf, retcode);
       }
-    } catch (std::exception& exp) {
+    } catch (std::exception&) {
       stream_.cleanup_fds();
       throw;
     }
@@ -1234,8 +1247,8 @@ namespace detail {
   }
 
 
+#ifndef WIN32
   inline void Child::execute_child() {
-#ifndef __USING_WINDOWS__
     int sys_ret = -1;
     auto& stream = parent_->stream_;
 
@@ -1271,13 +1284,13 @@ namespace detail {
 
       // Close the duped descriptors
       if (stream.read_from_parent_ != -1 && stream.read_from_parent_ > 2)
-        close(stream.read_from_parent_);
+        subprocess_close(stream.read_from_parent_);
 
       if (stream.write_to_parent_ != -1 && stream.write_to_parent_ > 2)
-        close(stream.write_to_parent_);
+        subprocess_close(stream.write_to_parent_);
 
       if (stream.err_write_ != -1 && stream.err_write_ > 2)
-        close(stream.err_write_);
+        subprocess_close(stream.err_write_);
 
       // Replace the current image with the executable
       sys_ret = execvp(parent_->exe_name_.c_str(), parent_->cargv_.data());
@@ -1295,24 +1308,24 @@ namespace detail {
     // Calling application would not get this
     // exit failure
     _exit (EXIT_FAILURE);
-#endif
   }
+#endif
 
 
   inline void Streams::setup_comm_channels()
   {
-#ifdef __USING_WINDOWS__
+#ifdef WIN32
     util::configure_pipe(&this->g_hChildStd_IN_Rd, &this->g_hChildStd_IN_Wr, &this->g_hChildStd_IN_Wr);
     this->input(util::file_from_handle(this->g_hChildStd_IN_Wr, "w"));
-    this->write_to_child_ = _fileno(this->input());
+    this->write_to_child_ = subprocess_fileno(this->input());
 
     util::configure_pipe(&this->g_hChildStd_OUT_Rd, &this->g_hChildStd_OUT_Wr, &this->g_hChildStd_OUT_Rd);
     this->output(util::file_from_handle(this->g_hChildStd_OUT_Rd, "r"));
-    this->read_from_child_ = _fileno(this->output());
+    this->read_from_child_ = subprocess_fileno(this->output());
 
     util::configure_pipe(&this->g_hChildStd_ERR_Rd, &this->g_hChildStd_ERR_Wr, &this->g_hChildStd_ERR_Rd);
     this->error(util::file_from_handle(this->g_hChildStd_ERR_Rd, "r"));
-    this->err_read_ = _fileno(this->error());
+    this->err_read_ = subprocess_fileno(this->error());
 #else
 
     if (write_to_child_ != -1)  input(fdopen(write_to_child_, "wb"));

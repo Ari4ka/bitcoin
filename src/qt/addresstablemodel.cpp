@@ -1,20 +1,20 @@
-// Copyright (c) 2011-2022 The Bitcoin Core developers
+// Copyright (c) 2011-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <qt/addresstablemodel.h>
 
+#include <key_io.h>
 #include <qt/guiutil.h>
 #include <qt/walletmodel.h>
-
-#include <key_io.h>
+#include <util/check.h>
 #include <wallet/types.h>
 #include <wallet/wallet.h>
 
-#include <algorithm>
-
-#include <QFont>
 #include <QDebug>
+#include <QFont>
+
+#include <algorithm>
 
 const QString AddressTableModel::Send = "S";
 const QString AddressTableModel::Receive = "R";
@@ -61,7 +61,7 @@ constexpr AddressTableEntry::Type translateTransactionType(wallet::AddressPurpos
     case wallet::AddressPurpose::RECEIVE: return AddressTableEntry::Receiving;
     case wallet::AddressPurpose::REFUND: return AddressTableEntry::Hidden;
     } // no default case, so the compiler can warn about missing cases
-    assert(false);
+    AssertUnreachable();
 }
 
 // Private implementation
@@ -209,7 +209,7 @@ QVariant AddressTableModel::data(const QModelIndex &index, int role) const
         case Address:
             return rec->address;
         } // no default case, so the compiler can warn about missing cases
-        assert(false);
+        AssertUnreachable();
     } else if (role == Qt::FontRole) {
         switch (column) {
         case Label:
@@ -217,7 +217,7 @@ QVariant AddressTableModel::data(const QModelIndex &index, int role) const
         case Address:
             return GUIUtil::fixedPitchFont();
         } // no default case, so the compiler can warn about missing cases
-        assert(false);
+        AssertUnreachable();
     } else if (role == TypeRole) {
         switch(rec->type)
         {
@@ -228,7 +228,7 @@ QVariant AddressTableModel::data(const QModelIndex &index, int role) const
         case AddressTableEntry::Hidden:
             return {};
         } // no default case, so the compiler can warn about missing cases
-        assert(false);
+        AssertUnreachable();
     }
     return QVariant();
 }
@@ -270,7 +270,7 @@ bool AddressTableModel::setData(const QModelIndex &index, const QVariant &value,
             // Check for duplicate addresses to prevent accidental deletion of addresses, if you try
             // to paste an existing address over another address (with a different label)
             if (walletModel->wallet().getAddress(
-                    newAddress, /* name= */ nullptr, /* is_mine= */ nullptr, /* purpose= */ nullptr))
+                    newAddress, /*name=*/nullptr, /*purpose=*/ nullptr))
             {
                 editStatus = DUPLICATE_ADDRESS;
                 return false;
@@ -356,7 +356,7 @@ QString AddressTableModel::addRow(const QString &type, const QString &label, con
         // Check for duplicate addresses
         {
             if (walletModel->wallet().getAddress(
-                    DecodeDestination(strAddress), /* name= */ nullptr, /* is_mine= */ nullptr, /* purpose= */ nullptr))
+                    DecodeDestination(strAddress), /*name=*/nullptr, /*purpose=*/nullptr))
             {
                 editStatus = DUPLICATE_ADDRESS;
                 return QString();
@@ -429,7 +429,7 @@ bool AddressTableModel::getAddressData(const QString &address,
         std::string* name,
         wallet::AddressPurpose* purpose) const {
     CTxDestination destination = DecodeDestination(address.toStdString());
-    return walletModel->wallet().getAddress(destination, name, /* is_mine= */ nullptr, purpose);
+    return walletModel->wallet().getAddress(destination, name, purpose);
 }
 
 int AddressTableModel::lookupAddress(const QString &address) const

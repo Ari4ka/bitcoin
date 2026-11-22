@@ -1,24 +1,24 @@
-// Copyright (c) 2022 The Bitcoin Core developers
+// Copyright (c) 2022-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #ifndef BITCOIN_NODE_EVICTION_H
 #define BITCOIN_NODE_EVICTION_H
 
-#include <node/connection_types.h>
-#include <net_permissions.h>
+#include <net_types.h>
+#include <netaddress.h>
+#include <util/time.h>
 
-#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <vector>
 
-typedef int64_t NodeId;
+enum class ConnectionType;
 
 struct NodeEvictionCandidate {
     NodeId id;
-    std::chrono::seconds m_connected;
-    std::chrono::microseconds m_min_ping_time;
+    NodeClock::time_point m_connected;
+    NodeClock::duration m_min_ping_time;
     std::chrono::seconds m_last_block_time;
     std::chrono::seconds m_last_tx_time;
     bool fRelevantServices;

@@ -1,8 +1,9 @@
-// Copyright (c) 2020-2022 The Bitcoin Core developers
+// Copyright (c) 2020-present The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <node/mempool_persist.h>
+#include <test/util/time.h>
 
 #include <node/mempool_args.h>
 #include <node/mempool_persist_args.h>
@@ -10,6 +11,7 @@
 #include <test/fuzz/fuzz.h>
 #include <test/fuzz/util.h>
 #include <test/fuzz/util/mempool.h>
+#include <test/fuzz/util/reachability.h>
 #include <test/util/setup_common.h>
 #include <test/util/txmempool.h>
 #include <txmempool.h>
@@ -28,10 +30,12 @@ using node::MempoolPath;
 
 namespace {
 const TestingSetup* g_setup;
+constexpr ReachabilityGoal MEMPOOL_LOAD_SUCCEEDS{"mempool loading succeeds"};
 } // namespace
 
 void initialize_validation_load_mempool()
 {
+    RegisterReachabilityGoal(MEMPOOL_LOAD_SUCCEEDS);
     static const auto testing_setup = MakeNoLogFileContext<const TestingSetup>();
     g_setup = testing_setup.get();
 }
@@ -40,7 +44,7 @@ FUZZ_TARGET(validation_load_mempool, .init = initialize_validation_load_mempool)
 {
     SeedRandomStateForTest(SeedRand::ZEROS);
     FuzzedDataProvider fuzzed_data_provider{buffer.data(), buffer.size()};
-    SetMockTime(ConsumeTime(fuzzed_data_provider));
+    FakeNodeClock clock{ConsumeTime(fuzzed_data_provider)};
     FuzzedFileProvider fuzzed_file_provider{fuzzed_data_provider};
 
     bilingual_str error;
@@ -53,10 +57,12 @@ FUZZ_TARGET(validation_load_mempool, .init = initialize_validation_load_mempool)
     auto fuzzed_fopen = [&](const fs::path&, const char*) {
         return fuzzed_file_provider.open();
     };
-    (void)LoadMempool(pool, MempoolPath(g_setup->m_args), chainstate,
-                      {
-                          .mockable_fopen_function = fuzzed_fopen,
-                      });
+    const bool load_success{
+        LoadMempool(pool, MempoolPath(g_setup->m_args), chainstate,
+                    {
+                        .mockable_fopen_function = fuzzed_fopen,
+                    })};
     pool.SetLoadTried(true);
     (void)DumpMempool(pool, MempoolPath(g_setup->m_args), fuzzed_fopen, true);
+    ObserveReachabilityGoal(load_success, MEMPOOL_LOAD_SUCCEEDS);
 }
